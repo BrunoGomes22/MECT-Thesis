@@ -1,0 +1,11 @@
+manter documento com todos os documentos lidos
+
+pontos essenciais do pitch:
+- problema 
+- soluções das redes 6g (com split e federated learning)
+- potenciais aplicações:
+	-> RLC - Protocol Error Detection
+	-> RRC - Predict Network Conditions
+	-> RRC - Resource allocation optimization
+	-> MAC - Shared Network Access Management
+- conclusão
