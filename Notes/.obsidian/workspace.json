@@ -8,17 +8,15 @@
         "type": "tabs",
         "children": [
           {
-            "id": "0fb762b9834a62de",
+            "id": "d84af949b12ebf0d",
             "type": "leaf",
             "state": {
-              "type": "markdown",
+              "type": "image",
               "state": {
-                "file": "Topics about ML.md",
-                "mode": "source",
-                "source": false
+                "file": "Pasted image 20251028174719.png"
               },
-              "icon": "lucide-file",
-              "title": "Topics about ML"
+              "icon": "lucide-image",
+              "title": "Pasted image 20251028174719"
             }
           }
         ]
@@ -78,7 +76,7 @@
       }
     ],
     "direction": "horizontal",
-    "width": 300
+    "width": 200
   },
   "right": {
     "id": "ca53316284b7bf43",
@@ -167,14 +165,20 @@
       "bases:Create new base": false
     }
   },
-  "active": "0fb762b9834a62de",
+  "active": "d84af949b12ebf0d",
   "lastOpenFiles": [
-    "Notas para reunião (29 de Outubro).md",
-    "Topics about ML.md",
-    "Notas Pitch (2 novembro).md",
     "Notas para reunião (15 Outubro).md",
-    "Pasted image 20251028174719.png",
+    "Notas para reunião (29 de Outubro).md",
+    "Notas Pitch (2 novembro).md",
+    "Notas reunião (7 Novembro).md",
     "O-RAN.png",
+    "Pasted image 20251107113544.png",
+    "Pasted image 20251107093202.png",
+    "Pasted image 20251107092817.png",
+    "Projeto TPR IPs.md",
+    "Topics about ML.md",
+    "Pasted image 20251107094938.png",
+    "Pasted image 20251028174719.png",
     "Welcome.md"
   ]
 }
