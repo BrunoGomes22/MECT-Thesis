@@ -75,15 +75,35 @@ class PriorityPrbXapp(xAppBase):
 
         self.known_ues = set()
         self.ue_dl_thp = {}
-        self.dl_load = None
+        self.dl_load = None # raw DL load
+        self.smoothed_dl_load = None # smoothed DL load using EMA 
 
         self.current_cap = {}
         self.last_control_time = {}
         self.last_print_time = 0.0
 
+        self.congestion_active = False
+
+    def update_congestion_state(self): # hysteresis to avoid flapping around the congestion threshold
+        if self.smoothed_dl_load is None:
+            return
+
+        if not self.congestion_active and self.smoothed_dl_load >= self.args.congestion_enter_threshold:
+            self.congestion_active = True
+
+        elif self.congestion_active and self.smoothed_dl_load <= self.args.congestion_exit_threshold:
+            self.congestion_active = False
+
     def is_active_ue(self, ue_id): # consider only UEs with non-zero DL throughput as active
         thp = self.ue_dl_thp.get(ue_id, 0.0)
         return thp is not None and thp >= self.args.active_dl_threshold
+
+    def displayed_target_cap_for_ue(self, ue_id): # get the target cap that would be applied to this UE based on current load and priority
+        if not self.is_active_ue(ue_id):
+            return 100
+
+        priority = self.priority_of_ue(ue_id)
+        return self.target_cap_for_priority(priority)
 
     def compute_dl_load(self, used_dl, avail_dl, total_dl):
         # prefer RRU.PrbTotDl because it is already a percentage
@@ -95,6 +115,18 @@ class PriorityPrbXapp(xAppBase):
             return max(0.0, min(100.0, 100.0 * used_dl / (used_dl + avail_dl)))
 
         return None
+
+    def update_smoothed_dl_load(self): # update the smoothed DL load using exponential moving average (EMA)
+        if self.dl_load is None:
+            return
+
+        alpha = self.args.load_smoothing_alpha
+
+        if self.smoothed_dl_load is None:
+            self.smoothed_dl_load = self.dl_load
+        else:
+            self.smoothed_dl_load = alpha * self.dl_load + (1 - alpha) * self.smoothed_dl_load
+
 
     def priority_of_ue(self, ue_id):
         if ue_id in self.high_ues:
@@ -110,10 +142,12 @@ class PriorityPrbXapp(xAppBase):
             return 100
 
         # relax constraints when there is no congestion
-        if self.dl_load < self.args.congested_threshold:
+        #if self.dl_load < self.args.congested_threshold:
+        if not self.congestion_active:
             return 100
 
-        overload = self.dl_load - self.args.congested_threshold
+        load = self.smoothed_dl_load if self.smoothed_dl_load is not None else self.dl_load
+        overload = max(0.0, load - self.args.congestion_enter_threshold)
 
         # apply differentiated treatment when congestion is detected
         if priority == "high":
@@ -177,8 +211,11 @@ class PriorityPrbXapp(xAppBase):
         self.last_print_time = now
 
         print("\n--- Priority PRB xApp status ---")
-        print(f"DL PRB load: {self.dl_load}")
-        print(f"Congestion threshold: {self.args.congested_threshold}%")
+        print(f"DL PRB load raw: {self.dl_load}")
+        print(f"DL PRB load smoothed: {self.smoothed_dl_load}")
+        print(f"Congestion enter threshold: {self.args.congestion_enter_threshold}%")
+        print(f"Congestion exit threshold: {self.args.congestion_exit_threshold}%")
+        print(f"Congestion active: {self.congestion_active}")
         print(f"Control enabled: {self.args.enable_control}")
 
         if not self.known_ues:
@@ -186,7 +223,8 @@ class PriorityPrbXapp(xAppBase):
         else:
             for ue_id in sorted(self.known_ues):
                 priority = self.priority_of_ue(ue_id)
-                target_cap = self.target_cap_for_priority(priority)
+                #target_cap = self.target_cap_for_priority(priority)
+                target_cap = self.displayed_target_cap_for_ue(ue_id)
                 thp = self.ue_dl_thp.get(ue_id, None)
                 print(
                     f"UE {ue_id}: priority={priority}, "
@@ -194,7 +232,7 @@ class PriorityPrbXapp(xAppBase):
                     f"current_sent_cap={self.current_cap.get(ue_id)}"
                 )
 
-        if self.dl_load is not None and self.dl_load >= self.args.congested_threshold:
+        if self.dl_load is not None and self.congestion_active == True: #self.dl_load >= self.args.congested_threshold:
             print("Decision: CONGESTED -> priority caps active")
         else:
             print("Decision: NOT CONGESTED -> all caps relaxed to 100%")
@@ -208,6 +246,9 @@ class PriorityPrbXapp(xAppBase):
             total_dl = get_metric(meas_data, "RRU.PrbTotDl")
 
             self.dl_load = self.compute_dl_load(used_dl, avail_dl, total_dl)
+
+            self.update_smoothed_dl_load() # update the smoothed load value using EMA
+            self.update_congestion_state() # update congestion state based on the new load value
 
             self.print_status()
             self.apply_policy(e2_agent_id)
@@ -284,7 +325,9 @@ def parse_args():
     parser.add_argument("--granul_period_ms", type=int, default=1000)
     parser.add_argument("--print_period_seconds", type=float, default=1.0)
 
-    parser.add_argument("--congested_threshold", type=float, default=70.0)
+    #parser.add_argument("--congested_threshold", type=float, default=70.0)
+    parser.add_argument("--congestion_enter_threshold", type=float, default=75.0)
+    parser.add_argument("--congestion_exit_threshold", type=float, default=60.0)
     parser.add_argument("--active_dl_threshold", type=float, default=500.0) # 500 kbps
 
     parser.add_argument("--best_effort_ues", type=str, default="")
@@ -306,6 +349,7 @@ def parse_args():
     parser.add_argument("--control_holdoff_seconds", type=float, default=5.0)
     parser.add_argument("--enable_control", action="store_true")
     parser.add_argument("--rc_ran_func_id", type=int, default=3)
+    parser.add_argument("--load_smoothing_alpha", type=float, default=0.3)
 
     return parser.parse_args()
 
@@ -322,3 +366,4 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, xapp.signal_handler)
 
     xapp.start(args.e2_node_id)
+
