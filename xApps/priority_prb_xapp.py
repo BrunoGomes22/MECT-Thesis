@@ -25,6 +25,7 @@ Example:
 """
 
 import argparse
+import csv
 import signal
 import time
 
@@ -83,6 +84,62 @@ class PriorityPrbXapp(xAppBase):
         self.last_print_time = 0.0
 
         self.congestion_active = False
+
+        self.csv_file = None
+        self.csv_writer = None
+
+        if self.args.csv_log_file:
+            self.csv_file = open(self.args.csv_log_file, "w", newline="", buffering=1)
+
+            self.csv_writer = csv.DictWriter(
+                self.csv_file,
+                fieldnames=[
+                    "timestamp",
+                    "trigger",
+                    "e2_node_id",
+                    "ue_id",
+                    "priority",
+                    "is_active",
+                    "active_ue_count",
+                    "ue_dl_thp",
+                    "dl_load_raw",
+                    "dl_load_smoothed",
+                    "congestion_active",
+                    "target_cap",
+                    "previous_cap",
+                    "control_enabled",
+                    "control_sent",
+                ],
+            )
+
+            self.csv_writer.writeheader()
+
+    def log_decision(self, trigger, e2_agent_id, ue_id, target_cap, previous_cap, control_sent):
+        if self.csv_writer is None:
+            return
+
+        priority = self.priority_of_ue(ue_id)
+        thp = self.ue_dl_thp.get(ue_id, None)
+
+        self.csv_writer.writerow(
+            {
+                "timestamp": time.time(),
+                "trigger": trigger,
+                "e2_node_id": e2_agent_id,
+                "ue_id": ue_id,
+                "priority": priority,
+                "is_active": self.is_active_ue(ue_id),
+                "active_ue_count": self.active_ue_count(),
+                "ue_dl_thp": thp,
+                "dl_load_raw": self.dl_load,
+                "dl_load_smoothed": self.smoothed_dl_load,
+                "congestion_active": self.congestion_active,
+                "target_cap": target_cap,
+                "previous_cap": previous_cap,
+                "control_enabled": self.args.enable_control,
+                "control_sent": control_sent,
+            }
+        )
 
     def update_congestion_state(self): # hysteresis to avoid flapping around the congestion threshold
         if self.smoothed_dl_load is None:
@@ -176,7 +233,7 @@ class PriorityPrbXapp(xAppBase):
 
     def maybe_send_control(self, e2_agent_id, ue_id, target_cap):
         if not self.args.enable_control:
-            return
+            return False
 
         now = time.time()
 
@@ -186,13 +243,13 @@ class PriorityPrbXapp(xAppBase):
             pass 
 
         elif previous_cap == target_cap: # target cap is the same as the last one that was sent no need to send again
-            return
+            return False
 
         elif abs(previous_cap - target_cap) < self.args.min_cap_change: # target cap is close to the last one that was sent, skip to avoid unnecessary control messages
-            return
+            return False
 
         if now - self.last_control_time.get(ue_id, 0.0) < self.args.control_holdoff_seconds:
-            return
+            return False
 
         print(
             f"RC CONTROL: UE {ue_id} -> min={self.args.min_prb}%, "
@@ -211,22 +268,48 @@ class PriorityPrbXapp(xAppBase):
         self.current_cap[ue_id] = target_cap
         self.last_control_time[ue_id] = now
 
-    def apply_policy(self, e2_agent_id):
+        return True
+
+    def apply_policy(self, e2_agent_id, trigger):
         if self.dl_load is None:
             return
 
         active_count = self.active_ue_count()
 
         for ue_id in sorted(self.known_ues):
+            previous_cap = self.current_cap.get(ue_id)
+
             if not self.is_active_ue(ue_id):
+                target_cap = 100
+
                 if self.current_cap.get(ue_id) != 100:
-                    self.maybe_send_control(e2_agent_id, ue_id, 100)
+                    control_sent = self.maybe_send_control(e2_agent_id, ue_id, target_cap)
+                else:
+                    control_sent = False
+
+                self.log_decision(
+                    trigger,
+                    e2_agent_id,
+                    ue_id,
+                    target_cap,
+                    previous_cap,
+                    control_sent,
+                )
                 continue
             
             priority = self.priority_of_ue(ue_id)
             target_cap = self.target_cap_for_priority(priority, active_count)
 
-            self.maybe_send_control(e2_agent_id, ue_id, target_cap)
+            control_sent = self.maybe_send_control(e2_agent_id, ue_id, target_cap)
+
+            self.log_decision(
+                trigger,
+                e2_agent_id,
+                ue_id,
+                target_cap,
+                previous_cap,
+                control_sent,
+            )
 
     def print_status(self):
         now = time.time()
@@ -276,7 +359,7 @@ class PriorityPrbXapp(xAppBase):
             self.update_congestion_state() # update congestion state based on the new load value
 
             self.print_status()
-            self.apply_policy(e2_agent_id)
+            self.apply_policy(e2_agent_id, trigger="style1_prb")
 
         except Exception as exc:
             print(f"ERROR in Style 1 PRB callback: {exc}")
@@ -294,7 +377,7 @@ class PriorityPrbXapp(xAppBase):
                 self.ue_dl_thp[ue_id] = first_number(metrics.get("DRB.UEThpDl"))
 
             self.print_status()
-            self.apply_policy(e2_agent_id)
+            self.apply_policy(e2_agent_id, trigger="style4_ue")
 
         except Exception as exc:
             print(f"ERROR in Style 4 UE callback: {exc}")
@@ -376,6 +459,8 @@ def parse_args():
     parser.add_argument("--enable_control", action="store_true")
     parser.add_argument("--rc_ran_func_id", type=int, default=3)
     parser.add_argument("--load_smoothing_alpha", type=float, default=0.3)
+
+    parser.add_argument("--csv_log_file", type=str, default="")
 
     return parser.parse_args()
 
