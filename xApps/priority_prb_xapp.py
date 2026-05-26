@@ -98,12 +98,18 @@ class PriorityPrbXapp(xAppBase):
         thp = self.ue_dl_thp.get(ue_id, 0.0)
         return thp is not None and thp >= self.args.active_dl_threshold
 
+    def active_ues(self): # get the list of currently active UEs based on DL throughput
+        return [ue_id for ue_id in self.known_ues if self.is_active_ue(ue_id)]
+
+    def active_ue_count(self): # get the count of currently active UEs based on DL throughput
+        return len(self.active_ues())
+
     def displayed_target_cap_for_ue(self, ue_id): # get the target cap that would be applied to this UE based on current load and priority
         if not self.is_active_ue(ue_id):
             return 100
 
         priority = self.priority_of_ue(ue_id)
-        return self.target_cap_for_priority(priority)
+        return self.target_cap_for_priority(priority, self.active_ue_count())
 
     def compute_dl_load(self, used_dl, avail_dl, total_dl):
         # prefer RRU.PrbTotDl because it is already a percentage
@@ -137,13 +143,15 @@ class PriorityPrbXapp(xAppBase):
             return "best_effort"
         return self.args.default_priority
 
-    def target_cap_for_priority(self, priority):
+    def target_cap_for_priority(self, priority, active_count):
         if self.dl_load is None:
             return 100
 
         # relax constraints when there is no congestion
-        #if self.dl_load < self.args.congested_threshold:
         if not self.congestion_active:
+            return 100
+
+        if active_count <= 1:
             return 100
 
         load = self.smoothed_dl_load if self.smoothed_dl_load is not None else self.dl_load
@@ -151,13 +159,19 @@ class PriorityPrbXapp(xAppBase):
 
         # apply differentiated treatment when congestion is detected
         if priority == "high":
-            #return self.args.high_cap
             return 100
+
+        # with only 2 active UEs, use less agressive caps
+        if active_count == 2:
+            if priority == "medium":
+                return int(max(70, 90 - overload * 0.25)) # each percentage point of overload above the threshold reduces medium cap by 0.25 percentage points
+    
+            return int(max(50, 80 - overload * 0.5)) # each percentage point of overload above the threshold reduces best-effort cap by 0.5 percentage points
+
+        # with 3 or more active UEs, use stronger differentiation
         if priority == "medium":
-            #return self.args.medium_cap
             return int(max(60, 85 - overload * 0.5)) # each percentage point of overload above the threshold reduces medium cap by 0.5 percentage points
 
-        #return self.args.best_effort_cap
         return int(max(30, 70 - overload)) # each percentage point of overload above the threshold reduces best-effort cap by 1 percentage point
 
     def maybe_send_control(self, e2_agent_id, ue_id, target_cap):
@@ -166,7 +180,15 @@ class PriorityPrbXapp(xAppBase):
 
         now = time.time()
 
-        if self.current_cap.get(ue_id) == target_cap:
+        previous_cap = self.current_cap.get(ue_id)
+
+        if previous_cap is None: # no previous control sent for this UE, proceed to send control with target_cap
+            pass 
+
+        elif previous_cap == target_cap: # target cap is the same as the last one that was sent no need to send again
+            return
+
+        elif abs(previous_cap - target_cap) < self.args.min_cap_change: # target cap is close to the last one that was sent, skip to avoid unnecessary control messages
             return
 
         if now - self.last_control_time.get(ue_id, 0.0) < self.args.control_holdoff_seconds:
@@ -193,6 +215,8 @@ class PriorityPrbXapp(xAppBase):
         if self.dl_load is None:
             return
 
+        active_count = self.active_ue_count()
+
         for ue_id in sorted(self.known_ues):
             if not self.is_active_ue(ue_id):
                 if self.current_cap.get(ue_id) != 100:
@@ -200,7 +224,7 @@ class PriorityPrbXapp(xAppBase):
                 continue
             
             priority = self.priority_of_ue(ue_id)
-            target_cap = self.target_cap_for_priority(priority)
+            target_cap = self.target_cap_for_priority(priority, active_count)
 
             self.maybe_send_control(e2_agent_id, ue_id, target_cap)
 
@@ -216,6 +240,7 @@ class PriorityPrbXapp(xAppBase):
         print(f"Congestion enter threshold: {self.args.congestion_enter_threshold}%")
         print(f"Congestion exit threshold: {self.args.congestion_exit_threshold}%")
         print(f"Congestion active: {self.congestion_active}")
+        print(f"Active UEs: {self.active_ue_count()}")
         print(f"Control enabled: {self.args.enable_control}")
 
         if not self.known_ues:
@@ -347,6 +372,7 @@ def parse_args():
     parser.add_argument("--min_prb", type=int, default=10)
     parser.add_argument("--dedicated_prb", type=int, default=100)
     parser.add_argument("--control_holdoff_seconds", type=float, default=5.0)
+    parser.add_argument("--min_cap_change", type=int, default=5)
     parser.add_argument("--enable_control", action="store_true")
     parser.add_argument("--rc_ran_func_id", type=int, default=3)
     parser.add_argument("--load_smoothing_alpha", type=float, default=0.3)
