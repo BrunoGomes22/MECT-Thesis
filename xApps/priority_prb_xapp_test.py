@@ -196,11 +196,11 @@ class PriorityPrbXapp(xAppBase):
 
     def update_bandit(self):
         if self.last_bandit_context is None or self.last_bandit_action is None:
-            return
+            return False
 
         now = time.time()
         if now - self.last_bandit_reward_time < self.args.bandit_reward_delay:
-            return
+            return False
 
         reward = self.compute_reward()
 
@@ -215,8 +215,46 @@ class PriorityPrbXapp(xAppBase):
         self.bandit_n[key] = new_n
         self.bandit_q[key] = new_q
 
-        print(f"BANDIT UPDATE: context={key[0]}, action={key[1]}, reward={reward}, q={new_q}")
+        print(
+            f"BANDIT UPDATE: context={key[0]}, action={key[1]}, "
+            f"reward={reward}, q={new_q}, n={new_n}"
+        )   
 
+        # clear the pending action after it has been evaluated.
+        self.last_bandit_context = None
+        self.last_bandit_action = None
+        self.last_bandit_reward_time = 0.0
+
+        return True
+
+    def get_bandit_action_for_cycle(self):
+        # evaluate the previous action if enough time has passed
+        self.update_bandit()
+
+        # if there is no congestion use the relaxed profile
+        if not self.congestion_active:
+            return 0
+
+        # if there is only one active UE, no need for priority differentiation
+        if self.active_ue_count() <= 1:
+            return 0
+
+        # if an action is already pending reward evaluation keep using it
+        if self.last_bandit_action is not None:
+            return self.last_bandit_action
+
+        # otherwise choose a new action for the current context
+        context = self.get_context()
+        action_id = self.select_bandit_action(context)
+
+        self.last_bandit_context = context
+        self.last_bandit_action = action_id
+        self.last_bandit_reward_time = time.time()
+
+        print(f"BANDIT SELECT: context={context}, action={action_id}, profile={ACTION_PROFILES[action_id]}")
+
+        return action_id
+    '''
     def target_cap_for_priority_bandit(self, priority):
         if not self.congestion_active:
             return 100
@@ -236,7 +274,7 @@ class PriorityPrbXapp(xAppBase):
         self.last_bandit_reward_time = time.time()
 
         return profile[priority]
-
+    '''
 
     def log_decision(self, trigger, e2_agent_id, ue_id, target_cap, previous_cap, control_sent):
         if self.csv_writer is None:
@@ -290,6 +328,12 @@ class PriorityPrbXapp(xAppBase):
             return 100
 
         priority = self.priority_of_ue(ue_id)
+
+        if self.args.policy_mode == "bandit":
+            if self.last_bandit_action is None:
+                return 100
+            return ACTION_PROFILES[self.last_bandit_action][priority]
+
         return self.target_cap_for_priority(priority, self.active_ue_count())
 
     def compute_dl_load(self, used_dl, avail_dl, total_dl):
@@ -400,6 +444,12 @@ class PriorityPrbXapp(xAppBase):
 
         active_count = self.active_ue_count()
 
+        bandit_profile = None
+
+        if self.args.policy_mode == "bandit":
+            action_id = self.get_bandit_action_for_cycle()
+            bandit_profile = ACTION_PROFILES[action_id]
+
         for ue_id in sorted(self.known_ues):
             previous_cap = self.current_cap.get(ue_id)
 
@@ -424,7 +474,8 @@ class PriorityPrbXapp(xAppBase):
             priority = self.priority_of_ue(ue_id)
 
             if self.args.policy_mode == "bandit":
-                target_cap = self.target_cap_for_priority_bandit(priority)
+                #target_cap = self.target_cap_for_priority_bandit(priority)
+                target_cap = bandit_profile[priority]
             else:
                 target_cap = self.target_cap_for_priority(priority, active_count)
 
