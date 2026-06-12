@@ -330,8 +330,15 @@ class PriorityPrbXapp(xAppBase):
         priority = self.priority_of_ue(ue_id)
 
         if self.args.policy_mode == "bandit":
+            if not self.congestion_active:
+                return 100
+
+            if self.active_ue_count() <= 1:
+                return 100
+            
             if self.last_bandit_action is None:
                 return 100
+
             return ACTION_PROFILES[self.last_bandit_action][priority]
 
         return self.target_cap_for_priority(priority, self.active_ue_count())
@@ -527,7 +534,6 @@ class PriorityPrbXapp(xAppBase):
     def style1_prb_callback(self, e2_agent_id, subscription_id, indication_hdr, indication_msg):
         try:
             meas_data = self.e2sm_kpm.extract_meas_data(indication_msg)
-
             used_dl = get_metric(meas_data, "RRU.PrbUsedDl")
             avail_dl = get_metric(meas_data, "RRU.PrbAvailDl")
             total_dl = get_metric(meas_data, "RRU.PrbTotDl")
@@ -537,8 +543,8 @@ class PriorityPrbXapp(xAppBase):
             self.update_smoothed_dl_load() # update the smoothed load value using EMA
             self.update_congestion_state() # update congestion state based on the new load value
 
-            self.print_status()
             self.apply_policy(e2_agent_id, trigger="style1_prb")
+            self.print_status()
 
         except Exception as exc:
             print(f"ERROR in Style 1 PRB callback: {exc}")
@@ -555,9 +561,9 @@ class PriorityPrbXapp(xAppBase):
                 metrics = ue_data.get("measData", {})
                 self.ue_dl_thp[ue_id] = first_number(metrics.get("DRB.UEThpDl"))
 
-            self.print_status()
             self.apply_policy(e2_agent_id, trigger="style4_ue")
-
+            self.print_status()
+            
         except Exception as exc:
             print(f"ERROR in Style 4 UE callback: {exc}")
 
