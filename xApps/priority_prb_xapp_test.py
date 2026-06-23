@@ -29,6 +29,9 @@ import csv
 import signal
 import time
 import random
+import json
+import os
+import urllib.request
 
 from lib.xAppBase import xAppBase
 
@@ -51,6 +54,48 @@ ACTION_PROFILES = { # action profiles for contextual bandit
     4: {"high": 100, "medium": 60,  "best_effort": 30},   # severe
 }
 
+VALID_PRIORITIES = {"best_effort", "medium", "high"}
+
+def normalize_sd(sd):
+    if sd is None:
+        return "ffffff"
+
+    sd = str(sd).lower().replace("0x", "")
+    return sd.zfill(6)[-6:]
+
+
+def slice_key(sst, sd):
+    return f"{int(sst)}-{normalize_sd(sd)}"
+
+
+def parse_slice_priority_map(text):
+    """
+    Example:
+      1-000000=best_effort,1-000001=medium,1-000002=high
+    """
+    result = {}
+
+    if text is None or text.strip() == "":
+        return result
+
+    for item in text.split(","):
+        item = item.strip()
+        if not item:
+            continue
+
+        if "=" not in item:
+            raise ValueError(f"Invalid slice priority item: {item}")
+
+        key, priority = item.split("=", 1)
+        key = key.strip().lower()
+        priority = priority.strip()
+
+        if priority not in VALID_PRIORITIES:
+            raise ValueError(f"Invalid priority '{priority}' for slice '{key}'")
+
+        result[key] = priority
+
+    return result
 
 def parse_ue_list(text):
     if text is None or text.strip() == "":
@@ -102,6 +147,10 @@ class PriorityPrbXapp(xAppBase):
         self.last_bandit_context = None
         self.last_bandit_action = None
         self.last_bandit_reward_time = 0.0
+
+        self.ue_slice_map = {}
+        self.last_slice_map_load = 0.0
+        self.slice_priority_map = parse_slice_priority_map(args.slice_priority_map)
 
         if self.args.csv_log_file:
             self.csv_file = open(self.args.csv_log_file, "w", newline="", buffering=1)
@@ -365,8 +414,70 @@ class PriorityPrbXapp(xAppBase):
         else:
             self.smoothed_dl_load = alpha * self.dl_load + (1 - alpha) * self.smoothed_dl_load
 
+    def read_slice_map_source(self):
+        source = self.args.ue_slice_map_source
+
+        if source is None or source.strip() == "":
+            return None
+
+        source = source.strip()
+
+        if source.startswith("http://") or source.startswith("https://"):
+            with urllib.request.urlopen(source, timeout=0.5) as response:
+                return response.read().decode("utf-8")
+
+        if not os.path.exists(source):
+            return None
+
+        with open(source, "r") as f:
+            return f.read()
+
+
+    def reload_ue_slice_map_if_needed(self, force=False):
+        if not self.args.ue_slice_map_source:
+            return
+
+        now = time.time()
+
+        if not force and now - self.last_slice_map_load < self.args.slice_map_reload_seconds:
+            return
+
+        self.last_slice_map_load = now
+
+        try:
+            text = self.read_slice_map_source()
+            if not text:
+                return
+
+            data = json.loads(text)
+
+            new_map = {}
+
+            for item in data.get("ues", []):
+                ue_id = int(item["gnb_cu_ue_f1ap_id"])
+                key = slice_key(item["sst"], item.get("sd"))
+                new_map[ue_id] = key
+
+            self.ue_slice_map = new_map
+
+            if self.args.debug_slice_map:
+                print(f"Loaded UE slice map: {self.ue_slice_map}")
+
+        except Exception as exc:
+            if self.args.debug_slice_map:
+                print(f"ERROR loading UE slice map: {exc}")
+
 
     def priority_of_ue(self, ue_id):
+        # first try dynamic slice-based priority if slice map source is configured
+        self.reload_ue_slice_map_if_needed()
+
+        ue_slice = self.ue_slice_map.get(ue_id)
+
+        if ue_slice is not None:
+            return self.slice_priority_map.get(ue_slice, self.args.default_priority)
+
+        # fallback: old manual UE-ID mapping
         if ue_id in self.high_ues:
             return "high"
         if ue_id in self.medium_ues:
@@ -517,11 +628,12 @@ class PriorityPrbXapp(xAppBase):
         else:
             for ue_id in sorted(self.known_ues):
                 priority = self.priority_of_ue(ue_id)
+                ue_slice = self.ue_slice_map.get(ue_id, "unknown")
                 #target_cap = self.target_cap_for_priority(priority)
                 target_cap = self.displayed_target_cap_for_ue(ue_id)
                 thp = self.ue_dl_thp.get(ue_id, None)
                 print(
-                    f"UE {ue_id}: priority={priority}, "
+                    f"UE {ue_id}: slice={ue_slice}, priority={priority}, "
                     f"DL_thp={thp}, target_max_prb={target_cap}%, "
                     f"current_sent_cap={self.current_cap.get(ue_id)}"
                 )
@@ -571,10 +683,12 @@ class PriorityPrbXapp(xAppBase):
     def start(self, e2_node_id):
         print("Starting priority-aware PRB xApp")
         print(f"E2 node: {e2_node_id}")
-        print(f"High priority UEs: {sorted(self.high_ues)}")
-        print(f"Medium priority UEs: {sorted(self.medium_ues)}")
-        print(f"Best-effort UEs: {sorted(self.best_effort_ues)}")
-        print(f"Default priority for unmapped UEs: {self.args.default_priority}")
+        #print(f"High priority UEs: {sorted(self.high_ues)}")
+        #print(f"Medium priority UEs: {sorted(self.medium_ues)}")
+        #print(f"Best-effort UEs: {sorted(self.best_effort_ues)}")
+        #print(f"Default priority for unmapped UEs: {self.args.default_priority}")
+        print(f"UE slice map source: {self.args.ue_slice_map_source}")
+        print(f"Slice priority map: {self.slice_priority_map}")
 
         # Subscription 1: cell-level PRB load.
         self.e2sm_kpm.subscribe_report_service_style_1(
@@ -656,6 +770,33 @@ def parse_args():
 
     parser.add_argument("--bandit_epsilon", type=float, default=0.1)
     parser.add_argument("--bandit_reward_delay", type=float, default=3.0)
+
+    parser.add_argument(
+        "--ue_slice_map_source",
+        type=str,
+        default="",
+        help="Path or URL to srsRAN-exported UE slice map JSON.",
+    )
+
+    parser.add_argument(
+        "--slice_map_reload_seconds",
+        type=float,
+        default=1.0,
+        help="How often to reload the UE slice map.",
+    )
+
+    parser.add_argument(
+        "--slice_priority_map",
+        type=str,
+        default="1-000000=best_effort,1-000001=medium,1-000002=high,1-ffffff=best_effort",
+        help="Mapping from S-NSSAI to priority, ex: 1-000001=medium,1-000002=high",
+    )
+
+    parser.add_argument(
+        "--debug_slice_map",
+        action="store_true",
+        help="Print slice map loading/debug messages.",
+    )
 
     return parser.parse_args()
 
