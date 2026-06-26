@@ -5,13 +5,15 @@ Minimal priority-aware PRB xApp for srsRAN OSC RIC.
 
 What it does:
 1. KPM Style 1: reads DU/cell PRB load.
-2. KPM Style 4: discovers connected UE IDs and reads DL throughput.
-3. If DL PRB load is below the congestion threshold, all discovered UEs get max_prb=100%.
-4. If DL PRB load is above the congestion threshold:
+2. KPM Style 4: discovers connected UE IDs and reads DL throughput/delay.
+3. Computes a multi-metric QoS pressure score from PRB use, UE competition,
+   DL delay, and priority-aware service degradation.
+4. If the QoS pressure score is below the congestion threshold, all discovered UEs get max_prb=100%.
+5. If the QoS pressure score is above the congestion threshold:
    - high-priority UEs get max_prb=100%
    - medium-priority UEs get max_prb=70%
    - best-effort UEs get max_prb=40%
-5. Sends E2SM-RC Slice-Level PRB Quota control per UE, but only if --enable_control is set.
+6. Sends E2SM-RC Slice-Level PRB Quota control per UE, but only if --enable_control is set.
 
 Example:
   docker compose exec python_xapp_runner ./priority_prb_xapp.py \
@@ -32,6 +34,8 @@ import random
 import json
 import os
 import urllib.request
+from collections import defaultdict, deque
+from statistics import median
 
 from lib.xAppBase import xAppBase
 
@@ -44,6 +48,7 @@ STYLE1_PRB_METRICS = [
 
 STYLE4_UE_METRICS = [
     "DRB.UEThpDl",
+    "DRB.RlcSduDelayDl",
 ]
 
 ACTION_PROFILES = { # action profiles for contextual bandit
@@ -55,6 +60,18 @@ ACTION_PROFILES = { # action profiles for contextual bandit
 }
 
 VALID_PRIORITIES = {"best_effort", "medium", "high"}
+
+PRIORITY_THROUGHPUT_WEIGHTS = {
+    "high": 3.0,
+    "medium": 2.0,
+    "best_effort": 1.0,
+}
+
+PRIORITY_DEGRADATION_IMPORTANCE = {
+    "high": 1.0,
+    "medium": 0.6,
+    "best_effort": 0.3,
+}
 
 def normalize_sd(sd):
     if sd is None:
@@ -119,6 +136,10 @@ def get_metric(meas_data, name):
     return first_number(metrics.get(name))
 
 
+def clip01(x):
+    return max(0.0, min(1.0, x))
+
+
 class PriorityPrbXapp(xAppBase):
     def __init__(self, config, http_server_port, rmr_port, args):
         super().__init__(config, http_server_port, rmr_port)
@@ -130,8 +151,16 @@ class PriorityPrbXapp(xAppBase):
 
         self.known_ues = set()
         self.ue_dl_thp = {}
+        self.ue_dl_delay_ms = {}
+        self.ue_delay_history = defaultdict(lambda: deque(maxlen=self.args.delay_history_len))
         self.dl_load = None # raw DL load
         self.smoothed_dl_load = None # smoothed DL load using EMA 
+        self.congestion_score = 0.0 # normalized multi-metric QoS pressure score
+        self.prb_pressure = 0.0
+        self.competition_pressure = 0.0
+        self.delay_pressure = None
+        self.service_degradation_pressure = 0.0
+        self.valid_delay_count = 0
 
         self.current_cap = {}
         self.last_control_time = {}
@@ -168,6 +197,12 @@ class PriorityPrbXapp(xAppBase):
                     "ue_dl_thp",
                     "dl_load_raw",
                     "dl_load_smoothed",
+                    "congestion_score",
+                    "prb_pressure",
+                    "competition_pressure",
+                    "delay_pressure",
+                    "service_degradation_pressure",
+                    "valid_delay_count",
                     "congestion_active",
                     "target_cap",
                     "previous_cap",
@@ -203,16 +238,10 @@ class PriorityPrbXapp(xAppBase):
     def compute_reward(self):
         reward = 0.0
 
-        weights = {
-            "high": 3.0,
-            "medium": 2.0,
-            "best_effort": 1.0,
-        }
-
         for ue_id in self.active_ues():
             priority = self.priority_of_ue(ue_id)
             thp = self.ue_dl_thp.get(ue_id, 0.0) or 0.0
-            reward += weights[priority] * thp
+            reward += PRIORITY_THROUGHPUT_WEIGHTS[priority] * thp
 
         # penalize very high PRB load
         load = self.smoothed_dl_load or 0.0
@@ -303,27 +332,6 @@ class PriorityPrbXapp(xAppBase):
         print(f"BANDIT SELECT: context={context}, action={action_id}, profile={ACTION_PROFILES[action_id]}")
 
         return action_id
-    '''
-    def target_cap_for_priority_bandit(self, priority):
-        if not self.congestion_active:
-            return 100
-
-        if self.active_ue_count() <= 1:
-            return 100
-
-        context = self.get_context()
-
-        self.update_bandit()
-
-        action_id = self.select_bandit_action(context)
-        profile = ACTION_PROFILES[action_id]
-
-        self.last_bandit_context = context
-        self.last_bandit_action = action_id
-        self.last_bandit_reward_time = time.time()
-
-        return profile[priority]
-    '''
 
     def log_decision(self, trigger, e2_agent_id, ue_id, target_cap, previous_cap, control_sent):
         if self.csv_writer is None:
@@ -344,6 +352,12 @@ class PriorityPrbXapp(xAppBase):
                 "ue_dl_thp": thp,
                 "dl_load_raw": self.dl_load,
                 "dl_load_smoothed": self.smoothed_dl_load,
+                "congestion_score": self.congestion_score,
+                "prb_pressure": self.prb_pressure,
+                "competition_pressure": self.competition_pressure,
+                "delay_pressure": self.delay_pressure,
+                "service_degradation_pressure": self.service_degradation_pressure,
+                "valid_delay_count": self.valid_delay_count,
                 "congestion_active": self.congestion_active,
                 "target_cap": target_cap,
                 "previous_cap": previous_cap,
@@ -352,14 +366,13 @@ class PriorityPrbXapp(xAppBase):
             }
         )
 
-    def update_congestion_state(self): # hysteresis to avoid flapping around the congestion threshold
-        if self.smoothed_dl_load is None:
-            return
+    def update_congestion_state(self): # hysteresis to avoid flapping around the congestion score threshold
+        self.update_congestion_score()
 
-        if not self.congestion_active and self.smoothed_dl_load >= self.args.congestion_enter_threshold:
+        if not self.congestion_active and self.congestion_score >= self.args.congestion_score_enter_threshold:
             self.congestion_active = True
 
-        elif self.congestion_active and self.smoothed_dl_load <= self.args.congestion_exit_threshold:
+        elif self.congestion_active and self.congestion_score <= self.args.congestion_score_exit_threshold:
             self.congestion_active = False
 
     def is_active_ue(self, ue_id): # consider only UEs with non-zero DL throughput as active
@@ -413,6 +426,112 @@ class PriorityPrbXapp(xAppBase):
             self.smoothed_dl_load = self.dl_load
         else:
             self.smoothed_dl_load = alpha * self.dl_load + (1 - alpha) * self.smoothed_dl_load
+
+    def compute_prb_pressure(self):
+        if self.smoothed_dl_load is None:
+            return 0.0
+
+        return clip01(self.smoothed_dl_load / 100.0)
+
+    def compute_competition_pressure(self):
+        active_count = self.active_ue_count()
+
+        if active_count <= 1:
+            return 0.0
+
+        return clip01((active_count - 1) / max(1, len(self.known_ues) - 1))
+
+    def compute_delay_pressure(self):
+        pressures = []
+
+        for ue_id in self.active_ues():
+            history = self.ue_delay_history.get(ue_id)
+            if not history:
+                continue
+
+            delay_ms = median(history)
+            denominator = self.args.delay_bad_ms - self.args.delay_good_ms
+            if denominator <= 0:
+                pressure = 1.0 if delay_ms > self.args.delay_good_ms else 0.0
+            else:
+                pressure = clip01((delay_ms - self.args.delay_good_ms) / denominator)
+
+            pressures.append(pressure)
+
+        self.valid_delay_count = len(pressures)
+
+        if not pressures:
+            return None
+
+        return sum(pressures) / len(pressures)
+
+    def compute_service_degradation_pressure(self):
+        """
+        Measure priority-aware under-service, not equal-share fairness.
+
+        The xApp intentionally differentiates PRB treatment by slice priority, so
+        equal throughput is not the objective. This pressure rises when active
+        UEs receive less throughput share than their priority weight suggests,
+        with higher-priority deficits counted more strongly.
+        """
+        active = self.active_ues()
+
+        if len(active) < 2:
+            return 0.0
+
+        ue_info = []
+        total_throughput = 0.0
+        total_weight = 0.0
+
+        for ue_id in active:
+            priority = self.priority_of_ue(ue_id)
+            thp = self.ue_dl_thp.get(ue_id, 0.0)
+
+            if thp is None or thp < 0:
+                thp = 0.0
+
+            weight = PRIORITY_THROUGHPUT_WEIGHTS.get(priority, 1.0)
+
+            ue_info.append((ue_id, priority, thp, weight))
+            total_throughput += thp
+            total_weight += weight
+
+        if total_throughput <= 0.0 or total_weight <= 0.0:
+            return 0.0
+
+        total_pressure = 0.0
+
+        for ue_id, priority, thp, weight in ue_info:
+            expected_share = weight / total_weight
+            actual_share = thp / total_throughput
+            under_service = max(0.0, expected_share - actual_share)
+
+            importance = PRIORITY_DEGRADATION_IMPORTANCE.get(priority, 1.0)
+            total_pressure += importance * under_service
+
+        return clip01(total_pressure / len(ue_info))
+
+    def update_congestion_score(self):
+        self.prb_pressure = self.compute_prb_pressure()
+        self.competition_pressure = self.compute_competition_pressure()
+        self.delay_pressure = self.compute_delay_pressure()
+        self.service_degradation_pressure = self.compute_service_degradation_pressure()
+
+        if self.delay_pressure is None:
+            score = (
+                0.45 * self.prb_pressure
+                + 0.30 * self.competition_pressure
+                + 0.25 * self.service_degradation_pressure
+            )
+        else:
+            score = (
+                0.35 * self.prb_pressure
+                + 0.25 * self.competition_pressure
+                + 0.25 * self.delay_pressure
+                + 0.15 * self.service_degradation_pressure
+            )
+
+        self.congestion_score = clip01(score)
 
     def read_slice_map_source(self):
         source = self.args.ue_slice_map_source
@@ -497,8 +616,8 @@ class PriorityPrbXapp(xAppBase):
         if active_count <= 1:
             return 100
 
-        load = self.smoothed_dl_load if self.smoothed_dl_load is not None else self.dl_load
-        overload = max(0.0, load - self.args.congestion_enter_threshold)
+        score_overload = max(0.0, self.congestion_score - self.args.congestion_score_enter_threshold)
+        overload = score_overload * 100
 
         # apply differentiated treatment when congestion is detected
         if priority == "high":
@@ -617,8 +736,14 @@ class PriorityPrbXapp(xAppBase):
         print("\n--- Priority PRB xApp status ---")
         print(f"DL PRB load raw: {self.dl_load}")
         print(f"DL PRB load smoothed: {self.smoothed_dl_load}")
-        print(f"Congestion enter threshold: {self.args.congestion_enter_threshold}%")
-        print(f"Congestion exit threshold: {self.args.congestion_exit_threshold}%")
+        print(f"QoS pressure score: {self.congestion_score}")
+        print(f"PRB pressure: {self.prb_pressure}")
+        print(f"Competition pressure: {self.competition_pressure}")
+        print(f"Delay pressure: {self.delay_pressure}")
+        print(f"Service degradation pressure: {self.service_degradation_pressure}")
+        print(f"Valid delay count: {self.valid_delay_count}")
+        print(f"Score enter threshold: {self.args.congestion_score_enter_threshold}")
+        print(f"Score exit threshold: {self.args.congestion_score_exit_threshold}")
         print(f"Congestion active: {self.congestion_active}")
         print(f"Active UEs: {self.active_ue_count()}")
         print(f"Control enabled: {self.args.enable_control}")
@@ -632,13 +757,14 @@ class PriorityPrbXapp(xAppBase):
                 #target_cap = self.target_cap_for_priority(priority)
                 target_cap = self.displayed_target_cap_for_ue(ue_id)
                 thp = self.ue_dl_thp.get(ue_id, None)
+                delay_ms = self.ue_dl_delay_ms.get(ue_id, None)
                 print(
                     f"UE {ue_id}: slice={ue_slice}, priority={priority}, "
-                    f"DL_thp={thp}, target_max_prb={target_cap}%, "
+                    f"DL_thp={thp}, DL_delay_ms={delay_ms}, target_max_prb={target_cap}%, "
                     f"current_sent_cap={self.current_cap.get(ue_id)}"
                 )
 
-        if self.dl_load is not None and self.congestion_active == True: #self.dl_load >= self.args.congested_threshold:
+        if self.congestion_active:
             print("Decision: CONGESTED -> priority caps active")
         else:
             print("Decision: NOT CONGESTED -> all caps relaxed to 100%")
@@ -672,7 +798,22 @@ class PriorityPrbXapp(xAppBase):
 
                 metrics = ue_data.get("measData", {})
                 self.ue_dl_thp[ue_id] = first_number(metrics.get("DRB.UEThpDl"))
+                raw_delay = first_number(metrics.get("DRB.RlcSduDelayDl"))
 
+                if raw_delay is None:
+                    self.ue_dl_delay_ms[ue_id] = None
+                else:
+                    delay_ms = raw_delay * 0.1
+                    self.ue_dl_delay_ms[ue_id] = delay_ms
+
+                    if (
+                        self.is_active_ue(ue_id)
+                        and delay_ms >= 0
+                        and delay_ms <= self.args.max_valid_delay_ms
+                    ):
+                        self.ue_delay_history[ue_id].append(delay_ms)
+
+            self.update_congestion_state()
             self.apply_policy(e2_agent_id, trigger="style4_ue")
             self.print_status()
             
@@ -732,10 +873,16 @@ def parse_args():
     parser.add_argument("--granul_period_ms", type=int, default=1000)
     parser.add_argument("--print_period_seconds", type=float, default=1.0)
 
-    #parser.add_argument("--congested_threshold", type=float, default=70.0)
+    # Deprecated compatibility knobs. Congestion decisions now use congestion_score thresholds.
     parser.add_argument("--congestion_enter_threshold", type=float, default=75.0)
     parser.add_argument("--congestion_exit_threshold", type=float, default=60.0)
+    parser.add_argument("--congestion_score_enter_threshold", type=float, default=0.70)
+    parser.add_argument("--congestion_score_exit_threshold", type=float, default=0.50)
     parser.add_argument("--active_dl_threshold", type=float, default=500.0) # 500 kbps
+    parser.add_argument("--delay_good_ms", type=float, default=5.0)
+    parser.add_argument("--delay_bad_ms", type=float, default=50.0)
+    parser.add_argument("--max_valid_delay_ms", type=float, default=200.0)
+    parser.add_argument("--delay_history_len", type=int, default=5)
 
     parser.add_argument("--best_effort_ues", type=str, default="")
     parser.add_argument("--medium_ues", type=str, default="")
