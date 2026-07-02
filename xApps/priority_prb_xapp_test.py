@@ -8,12 +8,11 @@ What it does:
 2. KPM Style 4: discovers connected UE IDs and reads DL throughput/delay.
 3. Computes a multi-metric QoS pressure score from PRB use, UE competition,
    DL delay, and priority-aware service degradation.
-4. If the QoS pressure score is below the congestion threshold, all discovered UEs get max_prb=100%.
-5. If the QoS pressure score is above the congestion threshold:
-   - high-priority UEs get max_prb=100%
-   - medium-priority UEs get max_prb=70%
-   - best-effort UEs get max_prb=40%
-6. Sends E2SM-RC Slice-Level PRB Quota control per UE, but only if --enable_control is set.
+4. Uses that score continuously as the PRB differentiation intensity.
+   - heuristic mode maps the score directly to priority-aware PRB caps
+   - bandit mode learns an aggressiveness multiplier for the score
+5. Sends E2SM-RC Slice-Level PRB Quota control per UE, but only if --enable_control is set.
+6. Uses holdoff and minimum cap-change safeguards to avoid excessive RC messages.
 
 Example:
   docker compose exec python_xapp_runner ./priority_prb_xapp.py \
@@ -51,12 +50,12 @@ STYLE4_UE_METRICS = [
     "DRB.RlcSduDelayDl",
 ]
 
-ACTION_PROFILES = { # action profiles for contextual bandit
-    0: {"high": 100, "medium": 100, "best_effort": 100},  # relax
-    1: {"high": 100, "medium": 90,  "best_effort": 80},   # mild
-    2: {"high": 100, "medium": 80,  "best_effort": 60},   # moderate
-    3: {"high": 100, "medium": 70,  "best_effort": 40},   # strong
-    4: {"high": 100, "medium": 60,  "best_effort": 30},   # severe
+BANDIT_AGGRESSIVENESS = { # QoS-pressure multipliers for contextual bandit
+    0: 0.0,   # relaxed/no extra reaction
+    1: 0.5,   # mild
+    2: 0.75,  # moderate
+    3: 1.0,   # normal
+    4: 1.25,  # aggressive
 }
 
 VALID_PRIORITIES = {"best_effort", "medium", "high"}
@@ -214,17 +213,17 @@ class PriorityPrbXapp(xAppBase):
             self.csv_writer.writeheader()
 
     def get_context(self):
-        load = self.smoothed_dl_load or 0.0
+        score = self.congestion_score or 0.0
         active_count = self.active_ue_count()
 
-        if load < 60:
-            load_bucket = "low"
-        elif load < 75:
-            load_bucket = "medium"
-        elif load < 90:
-            load_bucket = "high"
+        if score < 0.25:
+            pressure_bucket = "low"
+        elif score < 0.50:
+            pressure_bucket = "medium"
+        elif score < 0.75:
+            pressure_bucket = "high"
         else:
-            load_bucket = "critical"
+            pressure_bucket = "critical"
 
         if active_count <= 1:
             active_bucket = "one"
@@ -233,7 +232,7 @@ class PriorityPrbXapp(xAppBase):
         else:
             active_bucket = "three_plus"
 
-        return (load_bucket, active_bucket)
+        return (pressure_bucket, active_bucket)
 
     def compute_reward(self):
         reward = 0.0
@@ -243,12 +242,9 @@ class PriorityPrbXapp(xAppBase):
             thp = self.ue_dl_thp.get(ue_id, 0.0) or 0.0
             reward += PRIORITY_THROUGHPUT_WEIGHTS[priority] * thp
 
-        # penalize very high PRB load
-        load = self.smoothed_dl_load or 0.0
-        if load > 90:
-            reward -= 10000
-        elif load > 80:
-            reward -= 5000
+        reward -= 5000.0 * (self.congestion_score or 0.0)
+        reward -= 3000.0 * (self.delay_pressure or 0.0)
+        reward -= 3000.0 * self.service_degradation_pressure
 
         return reward
     
@@ -257,13 +253,13 @@ class PriorityPrbXapp(xAppBase):
 
         # exploration
         if random.random() < epsilon:
-            return random.choice(list(ACTION_PROFILES.keys()))
+            return random.choice(list(BANDIT_AGGRESSIVENESS.keys()))
 
         # exploitation
         best_action = None
         best_value = None
 
-        for action_id in ACTION_PROFILES.keys():
+        for action_id in BANDIT_AGGRESSIVENESS.keys():
             value = self.bandit_q.get((context, action_id), 0.0)
 
             if best_value is None or value > best_value:
@@ -309,10 +305,6 @@ class PriorityPrbXapp(xAppBase):
         # evaluate the previous action if enough time has passed
         self.update_bandit()
 
-        # if there is no congestion use the relaxed profile
-        if not self.congestion_active:
-            return 0
-
         # if there is only one active UE, no need for priority differentiation
         if self.active_ue_count() <= 1:
             return 0
@@ -329,7 +321,10 @@ class PriorityPrbXapp(xAppBase):
         self.last_bandit_action = action_id
         self.last_bandit_reward_time = time.time()
 
-        print(f"BANDIT SELECT: context={context}, action={action_id}, profile={ACTION_PROFILES[action_id]}")
+        print(
+            f"BANDIT SELECT: context={context}, action={action_id}, "
+            f"aggressiveness={BANDIT_AGGRESSIVENESS[action_id]}"
+        )
 
         return action_id
 
@@ -366,14 +361,11 @@ class PriorityPrbXapp(xAppBase):
             }
         )
 
-    def update_congestion_state(self): # hysteresis to avoid flapping around the congestion score threshold
+    def update_congestion_state(self):
+        # Debug/status label only. Control decisions use congestion_score as a
+        # continuous intensity and are not gated by this boolean.
         self.update_congestion_score()
-
-        if not self.congestion_active and self.congestion_score >= self.args.congestion_score_enter_threshold:
-            self.congestion_active = True
-
-        elif self.congestion_active and self.congestion_score <= self.args.congestion_score_exit_threshold:
-            self.congestion_active = False
+        self.congestion_active = self.congestion_score > 0.0
 
     def is_active_ue(self, ue_id): # consider only UEs with non-zero DL throughput as active
         thp = self.ue_dl_thp.get(ue_id, 0.0)
@@ -392,16 +384,15 @@ class PriorityPrbXapp(xAppBase):
         priority = self.priority_of_ue(ue_id)
 
         if self.args.policy_mode == "bandit":
-            if not self.congestion_active:
-                return 100
-
             if self.active_ue_count() <= 1:
                 return 100
             
             if self.last_bandit_action is None:
                 return 100
 
-            return ACTION_PROFILES[self.last_bandit_action][priority]
+            aggressiveness = BANDIT_AGGRESSIVENESS[self.last_bandit_action]
+            effective_intensity = clip01((self.congestion_score or 0.0) * aggressiveness)
+            return self.target_cap_from_intensity(priority, effective_intensity)
 
         return self.target_cap_for_priority(priority, self.active_ue_count())
 
@@ -605,36 +596,30 @@ class PriorityPrbXapp(xAppBase):
             return "best_effort"
         return self.args.default_priority
 
+    def target_cap_from_intensity(self, priority, intensity):
+        intensity = clip01(intensity)
+
+        if priority == "high":
+            min_cap = self.args.high_min_cap_at_max_pressure
+        elif priority == "medium":
+            min_cap = self.args.medium_min_cap_at_max_pressure
+        elif priority == "best_effort":
+            min_cap = self.args.best_effort_min_cap_at_max_pressure
+        else:
+            min_cap = 100
+
+        cap = 100 - intensity * (100 - min_cap)
+        return int(round(max(min_cap, min(100, cap))))
+
     def target_cap_for_priority(self, priority, active_count):
         if self.dl_load is None:
-            return 100
-
-        # relax constraints when there is no congestion
-        if not self.congestion_active:
             return 100
 
         if active_count <= 1:
             return 100
 
-        score_overload = max(0.0, self.congestion_score - self.args.congestion_score_enter_threshold)
-        overload = score_overload * 100
-
-        # apply differentiated treatment when congestion is detected
-        if priority == "high":
-            return 100
-
-        # with only 2 active UEs, use less agressive caps
-        if active_count == 2:
-            if priority == "medium":
-                return int(max(70, 90 - overload * 0.25)) # each percentage point of overload above the threshold reduces medium cap by 0.25 percentage points
-    
-            return int(max(50, 80 - overload * 0.5)) # each percentage point of overload above the threshold reduces best-effort cap by 0.5 percentage points
-
-        # with 3 or more active UEs, use stronger differentiation
-        if priority == "medium":
-            return int(max(60, 85 - overload * 0.5)) # each percentage point of overload above the threshold reduces medium cap by 0.5 percentage points
-
-        return int(max(30, 70 - overload)) # each percentage point of overload above the threshold reduces best-effort cap by 1 percentage point
+        intensity = self.congestion_score or 0.0
+        return self.target_cap_from_intensity(priority, intensity)
 
     def maybe_send_control(self, e2_agent_id, ue_id, target_cap):
         if not self.args.enable_control:
@@ -681,11 +666,12 @@ class PriorityPrbXapp(xAppBase):
 
         active_count = self.active_ue_count()
 
-        bandit_profile = None
+        effective_intensity = None
 
         if self.args.policy_mode == "bandit":
             action_id = self.get_bandit_action_for_cycle()
-            bandit_profile = ACTION_PROFILES[action_id]
+            aggressiveness = BANDIT_AGGRESSIVENESS[action_id]
+            effective_intensity = clip01((self.congestion_score or 0.0) * aggressiveness)
 
         for ue_id in sorted(self.known_ues):
             previous_cap = self.current_cap.get(ue_id)
@@ -711,8 +697,7 @@ class PriorityPrbXapp(xAppBase):
             priority = self.priority_of_ue(ue_id)
 
             if self.args.policy_mode == "bandit":
-                #target_cap = self.target_cap_for_priority_bandit(priority)
-                target_cap = bandit_profile[priority]
+                target_cap = self.target_cap_from_intensity(priority, effective_intensity)
             else:
                 target_cap = self.target_cap_for_priority(priority, active_count)
 
@@ -742,10 +727,16 @@ class PriorityPrbXapp(xAppBase):
         print(f"Delay pressure: {self.delay_pressure}")
         print(f"Service degradation pressure: {self.service_degradation_pressure}")
         print(f"Valid delay count: {self.valid_delay_count}")
-        print(f"Score enter threshold: {self.args.congestion_score_enter_threshold}")
-        print(f"Score exit threshold: {self.args.congestion_score_exit_threshold}")
-        print(f"Congestion active: {self.congestion_active}")
+        print("Deprecated score thresholds: retained for CLI compatibility, not used for control")
+        print(f"Congestion active label: {self.congestion_active}")
         print(f"Active UEs: {self.active_ue_count()}")
+        print(f"Policy mode: {self.args.policy_mode}")
+        if self.args.policy_mode == "bandit":
+            action_label = self.last_bandit_action if self.last_bandit_action is not None else 0
+            print(
+                f"Bandit action: {action_label}, "
+                f"aggressiveness={BANDIT_AGGRESSIVENESS[action_label]}"
+            )
         print(f"Control enabled: {self.args.enable_control}")
 
         if not self.known_ues:
@@ -763,11 +754,6 @@ class PriorityPrbXapp(xAppBase):
                     f"DL_thp={thp}, DL_delay_ms={delay_ms}, target_max_prb={target_cap}%, "
                     f"current_sent_cap={self.current_cap.get(ue_id)}"
                 )
-
-        if self.congestion_active:
-            print("Decision: CONGESTED -> priority caps active")
-        else:
-            print("Decision: NOT CONGESTED -> all caps relaxed to 100%")
 
     def style1_prb_callback(self, e2_agent_id, subscription_id, indication_hdr, indication_msg):
         try:
@@ -808,8 +794,8 @@ class PriorityPrbXapp(xAppBase):
 
                     if (
                         self.is_active_ue(ue_id)
-                        and delay_ms >= 0
-                        and delay_ms <= self.args.max_valid_delay_ms
+                        and delay_ms >= 0          # there are some spurious negative delay values that have to be removed
+                        and delay_ms <= self.args.max_valid_delay_ms  # ignore spurious outliers that are too high
                     ):
                         self.ue_delay_history[ue_id].append(delay_ms)
 
@@ -873,7 +859,8 @@ def parse_args():
     parser.add_argument("--granul_period_ms", type=int, default=1000)
     parser.add_argument("--print_period_seconds", type=float, default=1.0)
 
-    # Deprecated compatibility knobs. Congestion decisions now use congestion_score thresholds.
+    # Deprecated compatibility knobs. These are retained for older command lines
+    # and are no longer used for control decisions.
     parser.add_argument("--congestion_enter_threshold", type=float, default=75.0)
     parser.add_argument("--congestion_exit_threshold", type=float, default=60.0)
     parser.add_argument("--congestion_score_enter_threshold", type=float, default=0.70)
@@ -894,9 +881,9 @@ def parse_args():
         choices=["best_effort", "medium", "high"],
     )
 
-    #parser.add_argument("--best_effort_cap", type=int, default=40)
-    #parser.add_argument("--medium_cap", type=int, default=70)
-    #parser.add_argument("--high_cap", type=int, default=100)
+    parser.add_argument("--medium_min_cap_at_max_pressure", type=int, default=60)
+    parser.add_argument("--best_effort_min_cap_at_max_pressure", type=int, default=30)
+    parser.add_argument("--high_min_cap_at_max_pressure", type=int, default=100)
 
     parser.add_argument("--min_prb", type=int, default=10)
     parser.add_argument("--dedicated_prb", type=int, default=100)
