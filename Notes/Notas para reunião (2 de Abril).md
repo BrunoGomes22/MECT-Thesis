@@ -18,7 +18,7 @@ Ao nível da **DU**:
 | RRU.PrbUsedUl                 | PRBs used in UL                     | Valores válidos                                                                     |
 | RRU.PrbTotDl                  | Total percentage of used PRBs in DL | Valores válidos                                                                     |
 | RRU.PrbTotUl                  | Total percentage of used PRBs in UL | Valores válidos                                                                     |
-| DRB.RlcPacketDropRateDl       | DL buffering delay                  | Valores pouco fidedignos (valores negativos ou muito altos)                         |
+| DRB.RlcSduDelayDL             | DL buffering delay                  | Valores pouco fidedignos (valores negativos ou muito altos)                         |
 | DRB.RlcPacketDropRateDl       | DL packet loss rate                 | O valor parece ser sempre 0 (talvez seja válido)                                    |
 | DRB.RlcSduTransmittedVolumeDL | DL data volume                      | Valores válidos                                                                     |
 | DRB.RlcSduTransmittedVolumeUL | UL data volume                      | Valores válidos                                                                     |
