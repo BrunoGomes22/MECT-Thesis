@@ -508,19 +508,27 @@ class PriorityPrbXapp(xAppBase):
         self.delay_pressure = self.compute_delay_pressure()
         self.service_degradation_pressure = self.compute_service_degradation_pressure()
 
-        if self.delay_pressure is None:
-            score = (
-                0.45 * self.prb_pressure
-                + 0.30 * self.competition_pressure
-                + 0.25 * self.service_degradation_pressure
-            )
-        else:
-            score = (
-                0.35 * self.prb_pressure
-                + 0.25 * self.competition_pressure
-                + 0.25 * self.delay_pressure
-                + 0.15 * self.service_degradation_pressure
-            )
+        weighted_sum = (
+            self.args.w_prb * self.prb_pressure
+            + self.args.w_competition * self.competition_pressure
+            + self.args.w_degradation * self.service_degradation_pressure
+        )
+
+        total_weight = (
+            self.args.w_prb
+            + self.args.w_competition
+            + self.args.w_degradation
+        )
+
+        if self.delay_pressure is not None:
+            weighted_sum += self.args.w_delay * self.delay_pressure
+            total_weight += self.args.w_delay
+
+        if total_weight <= 0:
+            self.congestion_score = 0.0
+            return
+
+        score = weighted_sum / total_weight
 
         self.congestion_score = clip01(score)
 
@@ -859,12 +867,6 @@ def parse_args():
     parser.add_argument("--granul_period_ms", type=int, default=1000)
     parser.add_argument("--print_period_seconds", type=float, default=1.0)
 
-    # Deprecated compatibility knobs. These are retained for older command lines
-    # and are no longer used for control decisions.
-    parser.add_argument("--congestion_enter_threshold", type=float, default=75.0)
-    parser.add_argument("--congestion_exit_threshold", type=float, default=60.0)
-    parser.add_argument("--congestion_score_enter_threshold", type=float, default=0.70)
-    parser.add_argument("--congestion_score_exit_threshold", type=float, default=0.50)
     parser.add_argument("--active_dl_threshold", type=float, default=500.0) # 500 kbps
     parser.add_argument("--delay_good_ms", type=float, default=5.0)
     parser.add_argument("--delay_bad_ms", type=float, default=50.0)
@@ -930,6 +932,34 @@ def parse_args():
         "--debug_slice_map",
         action="store_true",
         help="Print slice map loading/debug messages.",
+    )
+
+    parser.add_argument(
+        "--w_prb",
+        type=float,
+        default=0.35, 
+        help="Weight for PRB pressure in congestion score.",
+    )
+
+    parser.add_argument(
+        "--w_competition",
+        type=float,
+        default=0.25, 
+        help="Weight for competition pressure in congestion score.",
+    )
+
+    parser.add_argument(
+        "--w_delay",
+        type=float,
+        default=0.25, 
+        help="Weight for delay pressure in congestion score.",
+    )
+
+    parser.add_argument(
+        "--w_degradation",
+        type=float,
+        default=0.15, 
+        help="Weight for service degradation pressure in congestion score.",
     )
 
     return parser.parse_args()
