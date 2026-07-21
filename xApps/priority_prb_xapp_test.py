@@ -7,7 +7,7 @@ What it does:
 1. KPM Style 1: reads DU/cell PRB load.
 2. KPM Style 4: discovers connected UE IDs and reads DL throughput/delay.
 3. Computes a multi-metric QoS pressure score from PRB use, UE competition,
-   DL delay, and priority-aware service degradation.
+   and DL delay.
 4. Uses that score continuously as the PRB differentiation intensity.
    - heuristic mode maps the score directly to priority-aware PRB caps
    - bandit mode learns an aggressiveness multiplier for the score
@@ -64,12 +64,6 @@ PRIORITY_THROUGHPUT_WEIGHTS = {
     "high": 3.0,
     "medium": 2.0,
     "best_effort": 1.0,
-}
-
-PRIORITY_DEGRADATION_IMPORTANCE = {
-    "high": 1.0,
-    "medium": 0.6,
-    "best_effort": 0.3,
 }
 
 def normalize_sd(sd):
@@ -158,7 +152,6 @@ class PriorityPrbXapp(xAppBase):
         self.prb_pressure = 0.0
         self.competition_pressure = 0.0
         self.delay_pressure = None
-        self.service_degradation_pressure = 0.0
         self.valid_delay_count = 0
 
         self.current_cap = {}
@@ -200,7 +193,6 @@ class PriorityPrbXapp(xAppBase):
                     "prb_pressure",
                     "competition_pressure",
                     "delay_pressure",
-                    "service_degradation_pressure",
                     "valid_delay_count",
                     "congestion_active",
                     "target_cap",
@@ -244,7 +236,6 @@ class PriorityPrbXapp(xAppBase):
 
         reward -= 5000.0 * (self.congestion_score or 0.0)
         reward -= 3000.0 * (self.delay_pressure or 0.0)
-        reward -= 3000.0 * self.service_degradation_pressure
 
         return reward
     
@@ -351,7 +342,6 @@ class PriorityPrbXapp(xAppBase):
                 "prb_pressure": self.prb_pressure,
                 "competition_pressure": self.competition_pressure,
                 "delay_pressure": self.delay_pressure,
-                "service_degradation_pressure": self.service_degradation_pressure,
                 "valid_delay_count": self.valid_delay_count,
                 "congestion_active": self.congestion_active,
                 "target_cap": target_cap,
@@ -456,68 +446,19 @@ class PriorityPrbXapp(xAppBase):
 
         return sum(pressures) / len(pressures)
 
-    def compute_service_degradation_pressure(self):
-        """
-        Measure priority-aware under-service, not equal-share fairness.
-
-        The xApp intentionally differentiates PRB treatment by slice priority, so
-        equal throughput is not the objective. This pressure rises when active
-        UEs receive less throughput share than their priority weight suggests,
-        with higher-priority deficits counted more strongly.
-        """
-        active = self.active_ues()
-
-        if len(active) < 2:
-            return 0.0
-
-        ue_info = []
-        total_throughput = 0.0
-        total_weight = 0.0
-
-        for ue_id in active:
-            priority = self.priority_of_ue(ue_id)
-            thp = self.ue_dl_thp.get(ue_id, 0.0)
-
-            if thp is None or thp < 0:
-                thp = 0.0
-
-            weight = PRIORITY_THROUGHPUT_WEIGHTS.get(priority, 1.0)
-
-            ue_info.append((ue_id, priority, thp, weight))
-            total_throughput += thp
-            total_weight += weight
-
-        if total_throughput <= 0.0 or total_weight <= 0.0:
-            return 0.0
-
-        total_pressure = 0.0
-
-        for ue_id, priority, thp, weight in ue_info:
-            expected_share = weight / total_weight
-            actual_share = thp / total_throughput
-            under_service = max(0.0, expected_share - actual_share)
-
-            importance = PRIORITY_DEGRADATION_IMPORTANCE.get(priority, 1.0)
-            total_pressure += importance * under_service
-
-        return clip01(total_pressure / len(ue_info))
-
     def update_congestion_score(self):
         self.prb_pressure = self.compute_prb_pressure()
         self.competition_pressure = self.compute_competition_pressure()
         self.delay_pressure = self.compute_delay_pressure()
-        self.service_degradation_pressure = self.compute_service_degradation_pressure()
 
         weighted_sum = (
             self.args.w_prb * self.prb_pressure
             + self.args.w_competition * self.competition_pressure
-            + self.args.w_degradation * self.service_degradation_pressure
         )
 
         total_weight = (
             self.args.w_prb
             + self.args.w_competition
-            + self.args.w_degradation
         )
 
         if self.delay_pressure is not None:
@@ -733,7 +674,6 @@ class PriorityPrbXapp(xAppBase):
         print(f"PRB pressure: {self.prb_pressure}")
         print(f"Competition pressure: {self.competition_pressure}")
         print(f"Delay pressure: {self.delay_pressure}")
-        print(f"Service degradation pressure: {self.service_degradation_pressure}")
         print(f"Valid delay count: {self.valid_delay_count}")
         print("Deprecated score thresholds: retained for CLI compatibility, not used for control")
         print(f"Congestion active label: {self.congestion_active}")
@@ -870,7 +810,7 @@ def parse_args():
     parser.add_argument("--active_dl_threshold", type=float, default=500.0) # 500 kbps
     parser.add_argument("--delay_good_ms", type=float, default=5.0)
     parser.add_argument("--delay_bad_ms", type=float, default=50.0)
-    parser.add_argument("--max_valid_delay_ms", type=float, default=200.0)
+    parser.add_argument("--max_valid_delay_ms", type=float, default=600.0)
     parser.add_argument("--delay_history_len", type=int, default=5)
 
     parser.add_argument("--best_effort_ues", type=str, default="")
@@ -937,14 +877,14 @@ def parse_args():
     parser.add_argument(
         "--w_prb",
         type=float,
-        default=0.35, 
+        default=0.40, 
         help="Weight for PRB pressure in congestion score.",
     )
 
     parser.add_argument(
         "--w_competition",
         type=float,
-        default=0.25, 
+        default=0.35, 
         help="Weight for competition pressure in congestion score.",
     )
 
@@ -953,13 +893,6 @@ def parse_args():
         type=float,
         default=0.25, 
         help="Weight for delay pressure in congestion score.",
-    )
-
-    parser.add_argument(
-        "--w_degradation",
-        type=float,
-        default=0.15, 
-        help="Weight for service degradation pressure in congestion score.",
     )
 
     return parser.parse_args()
