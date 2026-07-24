@@ -747,6 +747,12 @@ class PriorityPrbXapp(xAppBase):
                     ):
                         self.ue_delay_history[ue_id].append(delay_ms)
 
+            # clear delay history for UEs that are no longer active
+            for ue_id in self.known_ues:
+                if not self.is_active_ue(ue_id):
+                    self.ue_delay_history.pop(ue_id, None)
+                    self.ue_dl_delay_ms[ue_id] = None
+
             self.update_congestion_state()
             self.apply_policy(e2_agent_id, trigger="style4_ue")
             self.print_status()
