@@ -8,9 +8,10 @@ What it does:
 2. KPM Style 4: discovers connected UE IDs and reads DL throughput/delay.
 3. Computes a multi-metric QoS pressure score from PRB use, UE competition,
    and DL delay.
-4. Uses that score continuously as the PRB differentiation intensity.
-   - heuristic mode maps the score directly to priority-aware PRB caps
-   - bandit mode learns an aggressiveness multiplier for the score
+4. Uses that score continuously as the base PRB differentiation intensity,
+   gated by the delay pressure of active higher-priority UEs.
+   - heuristic mode maps the gated intensity to priority-aware PRB caps
+   - bandit mode learns an aggressiveness multiplier before the same gate
 5. Sends E2SM-RC Slice-Level PRB Quota control per UE, but only if --enable_control is set.
 6. Uses holdoff and minimum cap-change safeguards to avoid excessive RC messages.
 
@@ -59,6 +60,12 @@ BANDIT_AGGRESSIVENESS = { # QoS-pressure multipliers for contextual bandit
 }
 
 VALID_PRIORITIES = {"best_effort", "medium", "high"}
+
+HIGHER_PRIORITIES = {
+    "high": set(),
+    "medium": {"high"},
+    "best_effort": {"medium", "high"},
+}
 
 PRIORITY_THROUGHPUT_WEIGHTS = {
     "high": 3.0,
@@ -152,6 +159,7 @@ class PriorityPrbXapp(xAppBase):
         self.prb_pressure = 0.0
         self.competition_pressure = 0.0
         self.delay_pressure = None
+        self.ue_delay_pressure = {}
         self.valid_delay_count = 0
 
         self.current_cap = {}
@@ -187,6 +195,9 @@ class PriorityPrbXapp(xAppBase):
                     "is_active",
                     "active_ue_count",
                     "ue_dl_thp",
+                    "ue_dl_delay_ms",
+                    "ue_delay_median_ms",
+                    "ue_delay_pressure",
                     "dl_load_raw",
                     "dl_load_smoothed",
                     "congestion_score",
@@ -194,11 +205,30 @@ class PriorityPrbXapp(xAppBase):
                     "competition_pressure",
                     "delay_pressure",
                     "valid_delay_count",
+                    "higher_priority_pressure",
+                    "effective_intensity",
                     "congestion_active",
                     "target_cap",
                     "previous_cap",
                     "control_enabled",
                     "control_sent",
+                    "policy_mode",
+                    "w_prb",
+                    "w_competition",
+                    "w_delay",
+                    "active_dl_threshold",
+                    "delay_good_ms",
+                    "delay_bad_ms",
+                    "max_valid_delay_ms",
+                    "delay_history_len",
+                    "load_smoothing_alpha",
+                    "best_effort_min_cap_at_max_pressure",
+                    "medium_min_cap_at_max_pressure",
+                    "high_min_cap_at_max_pressure",
+                    "min_prb",
+                    "dedicated_prb",
+                    "control_holdoff_seconds",
+                    "min_cap_change",
                 ],
             )
 
@@ -319,12 +349,25 @@ class PriorityPrbXapp(xAppBase):
 
         return action_id
 
-    def log_decision(self, trigger, e2_agent_id, ue_id, target_cap, previous_cap, control_sent):
+    def log_decision(
+        self,
+        trigger,
+        e2_agent_id,
+        ue_id,
+        target_cap,
+        previous_cap,
+        control_sent,
+        higher_priority_pressure=None,
+        effective_intensity=None,
+    ):
         if self.csv_writer is None:
             return
 
         priority = self.priority_of_ue(ue_id)
         thp = self.ue_dl_thp.get(ue_id, None)
+        delay_ms = self.ue_dl_delay_ms.get(ue_id, None)
+        delay_history = self.ue_delay_history.get(ue_id)
+        delay_median_ms = median(delay_history) if delay_history else None
 
         self.csv_writer.writerow(
             {
@@ -336,6 +379,9 @@ class PriorityPrbXapp(xAppBase):
                 "is_active": self.is_active_ue(ue_id),
                 "active_ue_count": self.active_ue_count(),
                 "ue_dl_thp": thp,
+                "ue_dl_delay_ms": delay_ms,
+                "ue_delay_median_ms": delay_median_ms,
+                "ue_delay_pressure": self.ue_delay_pressure.get(ue_id),
                 "dl_load_raw": self.dl_load,
                 "dl_load_smoothed": self.smoothed_dl_load,
                 "congestion_score": self.congestion_score,
@@ -343,11 +389,30 @@ class PriorityPrbXapp(xAppBase):
                 "competition_pressure": self.competition_pressure,
                 "delay_pressure": self.delay_pressure,
                 "valid_delay_count": self.valid_delay_count,
+                "higher_priority_pressure": higher_priority_pressure,
+                "effective_intensity": effective_intensity,
                 "congestion_active": self.congestion_active,
                 "target_cap": target_cap,
                 "previous_cap": previous_cap,
                 "control_enabled": self.args.enable_control,
                 "control_sent": control_sent,
+                "policy_mode": self.args.policy_mode,
+                "w_prb": self.args.w_prb,
+                "w_competition": self.args.w_competition,
+                "w_delay": self.args.w_delay,
+                "active_dl_threshold": self.args.active_dl_threshold,
+                "delay_good_ms": self.args.delay_good_ms,
+                "delay_bad_ms": self.args.delay_bad_ms,
+                "max_valid_delay_ms": self.args.max_valid_delay_ms,
+                "delay_history_len": self.args.delay_history_len,
+                "load_smoothing_alpha": self.args.load_smoothing_alpha,
+                "best_effort_min_cap_at_max_pressure": self.args.best_effort_min_cap_at_max_pressure,
+                "medium_min_cap_at_max_pressure": self.args.medium_min_cap_at_max_pressure,
+                "high_min_cap_at_max_pressure": self.args.high_min_cap_at_max_pressure,
+                "min_prb": self.args.min_prb,
+                "dedicated_prb": self.args.dedicated_prb,
+                "control_holdoff_seconds": self.args.control_holdoff_seconds,
+                "min_cap_change": self.args.min_cap_change,
             }
         )
 
@@ -381,7 +446,14 @@ class PriorityPrbXapp(xAppBase):
                 return 100
 
             aggressiveness = BANDIT_AGGRESSIVENESS[self.last_bandit_action]
-            effective_intensity = clip01((self.congestion_score or 0.0) * aggressiveness)
+            base_intensity = clip01(
+                (self.congestion_score or 0.0) * aggressiveness
+            )
+            _, effective_intensity = self.gated_intensity_for_priority(
+                priority,
+                self.active_ue_count(),
+                base_intensity,
+            )
             return self.target_cap_from_intensity(priority, effective_intensity)
 
         return self.target_cap_for_priority(priority, self.active_ue_count())
@@ -422,21 +494,31 @@ class PriorityPrbXapp(xAppBase):
 
         return clip01((active_count - 1) / max(1, len(self.known_ues) - 1))
 
+    def delay_pressure_for_ue(self, ue_id):
+        """Return normalized median-delay pressure for one active UE."""
+        history = self.ue_delay_history.get(ue_id)
+        if not history:
+            return None
+
+        delay_ms = median(history)
+        denominator = self.args.delay_bad_ms - self.args.delay_good_ms
+        if denominator <= 0:
+            return 1.0 if delay_ms > self.args.delay_good_ms else 0.0
+
+        return clip01(
+            (delay_ms - self.args.delay_good_ms) / denominator
+        )
+
     def compute_delay_pressure(self):
         pressures = []
+        self.ue_delay_pressure = {}
 
         for ue_id in self.active_ues():
-            history = self.ue_delay_history.get(ue_id)
-            if not history:
+            pressure = self.delay_pressure_for_ue(ue_id)
+            if pressure is None:
                 continue
 
-            delay_ms = median(history)
-            denominator = self.args.delay_bad_ms - self.args.delay_good_ms
-            if denominator <= 0:
-                pressure = 1.0 if delay_ms > self.args.delay_good_ms else 0.0
-            else:
-                pressure = clip01((delay_ms - self.args.delay_good_ms) / denominator)
-
+            self.ue_delay_pressure[ue_id] = pressure
             pressures.append(pressure)
 
         self.valid_delay_count = len(pressures)
@@ -445,6 +527,52 @@ class PriorityPrbXapp(xAppBase):
             return None
 
         return sum(pressures) / len(pressures)
+
+    def higher_priority_pressure(self, priority):
+        """
+        Return the strongest delay pressure above `priority`.
+
+        If an active higher-priority UE has no valid delay history yet, use a
+        conservative pressure of 1.0 until measurements become available.
+        With no active higher-priority UE, no protection is needed.
+        """
+        higher_priorities = HIGHER_PRIORITIES.get(priority, set())
+        higher_ues = [
+            ue_id
+            for ue_id in self.active_ues()
+            if self.priority_of_ue(ue_id) in higher_priorities
+        ]
+
+        if not higher_ues:
+            return 0.0
+
+        pressures = []
+        for ue_id in higher_ues:
+            pressure = self.ue_delay_pressure.get(ue_id)
+            if pressure is None:
+                return 1.0
+            pressures.append(pressure)
+
+        return max(pressures)
+
+    def gated_intensity_for_priority(
+        self,
+        priority,
+        active_count,
+        base_intensity=None,
+    ):
+        """Combine cell-wide pressure with higher-priority protection need."""
+        if self.dl_load is None or active_count <= 1:
+            return 0.0, 0.0
+
+        if base_intensity is None:
+            base_intensity = self.congestion_score or 0.0
+
+        higher_pressure = self.higher_priority_pressure(priority)
+        effective_intensity = clip01(
+            clip01(base_intensity) * higher_pressure
+        )
+        return higher_pressure, effective_intensity
 
     def update_congestion_score(self):
         self.prb_pressure = self.compute_prb_pressure()
@@ -561,14 +689,14 @@ class PriorityPrbXapp(xAppBase):
         return int(round(max(min_cap, min(100, cap))))
 
     def target_cap_for_priority(self, priority, active_count):
-        if self.dl_load is None:
-            return 100
-
-        if active_count <= 1:
-            return 100
-
-        intensity = self.congestion_score or 0.0
-        return self.target_cap_from_intensity(priority, intensity)
+        _, effective_intensity = self.gated_intensity_for_priority(
+            priority,
+            active_count,
+        )
+        return self.target_cap_from_intensity(
+            priority,
+            effective_intensity,
+        )
 
     def maybe_send_control(self, e2_agent_id, ue_id, target_cap):
         if not self.args.enable_control:
@@ -615,12 +743,12 @@ class PriorityPrbXapp(xAppBase):
 
         active_count = self.active_ue_count()
 
-        effective_intensity = None
+        base_intensity = self.congestion_score or 0.0
 
         if self.args.policy_mode == "bandit":
             action_id = self.get_bandit_action_for_cycle()
             aggressiveness = BANDIT_AGGRESSIVENESS[action_id]
-            effective_intensity = clip01((self.congestion_score or 0.0) * aggressiveness)
+            base_intensity = clip01(base_intensity * aggressiveness)
 
         for ue_id in sorted(self.known_ues):
             previous_cap = self.current_cap.get(ue_id)
@@ -640,15 +768,23 @@ class PriorityPrbXapp(xAppBase):
                     target_cap,
                     previous_cap,
                     control_sent,
+                    0.0,
+                    0.0,
                 )
                 continue
             
             priority = self.priority_of_ue(ue_id)
-
-            if self.args.policy_mode == "bandit":
-                target_cap = self.target_cap_from_intensity(priority, effective_intensity)
-            else:
-                target_cap = self.target_cap_for_priority(priority, active_count)
+            higher_pressure, effective_intensity = (
+                self.gated_intensity_for_priority(
+                    priority,
+                    active_count,
+                    base_intensity,
+                )
+            )
+            target_cap = self.target_cap_from_intensity(
+                priority,
+                effective_intensity,
+            )
 
             control_sent = self.maybe_send_control(e2_agent_id, ue_id, target_cap)
 
@@ -659,6 +795,8 @@ class PriorityPrbXapp(xAppBase):
                 target_cap,
                 previous_cap,
                 control_sent,
+                higher_pressure,
+                effective_intensity,
             )
 
     def print_status(self):
@@ -697,9 +835,18 @@ class PriorityPrbXapp(xAppBase):
                 target_cap = self.displayed_target_cap_for_ue(ue_id)
                 thp = self.ue_dl_thp.get(ue_id, None)
                 delay_ms = self.ue_dl_delay_ms.get(ue_id, None)
+                ue_pressure = self.ue_delay_pressure.get(ue_id)
+                higher_pressure = (
+                    self.higher_priority_pressure(priority)
+                    if self.is_active_ue(ue_id)
+                    else 0.0
+                )
                 print(
                     f"UE {ue_id}: slice={ue_slice}, priority={priority}, "
-                    f"DL_thp={thp}, DL_delay_ms={delay_ms}, target_max_prb={target_cap}%, "
+                    f"DL_thp={thp}, DL_delay_ms={delay_ms}, "
+                    f"delay_pressure={ue_pressure}, "
+                    f"higher_priority_pressure={higher_pressure}, "
+                    f"target_max_prb={target_cap}%, "
                     f"current_sent_cap={self.current_cap.get(ue_id)}"
                 )
 
@@ -742,7 +889,7 @@ class PriorityPrbXapp(xAppBase):
 
                     if (
                         self.is_active_ue(ue_id)
-                        and delay_ms >= 0          # there are some spurious negative delay values that have to be removed
+                        and delay_ms >= 0
                         and delay_ms <= self.args.max_valid_delay_ms  # ignore spurious outliers that are too high
                     ):
                         self.ue_delay_history[ue_id].append(delay_ms)
@@ -815,8 +962,8 @@ def parse_args():
 
     parser.add_argument("--active_dl_threshold", type=float, default=500.0) # 500 kbps
     parser.add_argument("--delay_good_ms", type=float, default=5.0)
-    parser.add_argument("--delay_bad_ms", type=float, default=50.0)
-    parser.add_argument("--max_valid_delay_ms", type=float, default=600.0)
+    parser.add_argument("--delay_bad_ms", type=float, default=100.0)
+    parser.add_argument("--max_valid_delay_ms", type=float, default=6000.0)
     parser.add_argument("--delay_history_len", type=int, default=5)
 
     parser.add_argument("--best_effort_ues", type=str, default="")
@@ -829,12 +976,12 @@ def parse_args():
         choices=["best_effort", "medium", "high"],
     )
 
-    parser.add_argument("--medium_min_cap_at_max_pressure", type=int, default=60)
-    parser.add_argument("--best_effort_min_cap_at_max_pressure", type=int, default=30)
+    parser.add_argument("--medium_min_cap_at_max_pressure", type=int, default=70)
+    parser.add_argument("--best_effort_min_cap_at_max_pressure", type=int, default=20)
     parser.add_argument("--high_min_cap_at_max_pressure", type=int, default=100)
 
     parser.add_argument("--min_prb", type=int, default=10)
-    parser.add_argument("--dedicated_prb", type=int, default=100)
+    parser.add_argument("--dedicated_prb", type=int, default=0)
     parser.add_argument("--control_holdoff_seconds", type=float, default=5.0)
     parser.add_argument("--min_cap_change", type=int, default=5)
     parser.add_argument("--enable_control", action="store_true")
