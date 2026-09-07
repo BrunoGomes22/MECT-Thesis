@@ -492,7 +492,10 @@ class PriorityPrbXapp(xAppBase):
         if active_count <= 1:
             return 0.0
 
-        return clip01((active_count - 1) / max(1, len(self.known_ues) - 1))
+        # Use only active UEs so disconnected or idle known UEs cannot change
+        # the pressure. Under equal sharing, one UE's nominal share is 1/N;
+        # the remainder represents competition from the other active UEs.
+        return clip01(1.0 - (1.0 / active_count))
 
     def delay_pressure_for_ue(self, ue_id):
         """Return normalized median-delay pressure for one active UE."""
