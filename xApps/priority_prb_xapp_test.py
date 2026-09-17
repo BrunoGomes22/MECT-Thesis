@@ -9,7 +9,8 @@ What it does:
 3. Computes a multi-metric QoS pressure score from PRB use, UE competition,
    and DL delay.
 4. Uses that score continuously as the base PRB differentiation intensity,
-   gated by the delay pressure of active higher-priority UEs.
+   gated by the priority-weighted delay pressure of active higher-priority
+   UEs.
    - heuristic mode maps the gated intensity to priority-aware PRB caps
    - bandit mode learns an aggressiveness multiplier before the same gate
 5. Sends E2SM-RC Slice-Level PRB Quota control per UE, but only if --enable_control is set.
@@ -71,6 +72,17 @@ PRIORITY_THROUGHPUT_WEIGHTS = {
     "high": 3.0,
     "medium": 2.0,
     "best_effort": 1.0,
+}
+
+# Normalize the same 3:2:1 priority levels against high priority when a UE's
+# delay pressure protects lower-priority traffic.  Consequently, equal delay
+# pressure from high has a stronger effect on best effort than equal pressure
+# from medium, while zero delay pressure still causes no restriction.
+HIGHER_PRIORITY_PROTECTION_FACTORS = {
+    "high": 1.0,
+    "medium": 2.0 / 3.0,
+    #"medium": 0.85,
+    "best_effort": 1.0 / 3.0,
 }
 
 def normalize_sd(sd):
@@ -533,11 +545,14 @@ class PriorityPrbXapp(xAppBase):
 
     def higher_priority_pressure(self, priority):
         """
-        Return the strongest delay pressure above `priority`.
+        Return the strongest priority-weighted delay pressure above
+        `priority`.
 
         If an active higher-priority UE has no valid delay history yet, use a
-        conservative pressure of 1.0 until measurements become available.
-        With no active higher-priority UE, no protection is needed.
+        conservative raw pressure of 1.0 until measurements become available.
+        The raw pressure is multiplied by the protecting UE's priority factor,
+        so high pressure protects more strongly than medium pressure. With no
+        active higher-priority UE, no protection is needed.
         """
         higher_priorities = HIGHER_PRIORITIES.get(priority, set())
         higher_ues = [
@@ -551,10 +566,14 @@ class PriorityPrbXapp(xAppBase):
 
         pressures = []
         for ue_id in higher_ues:
-            pressure = self.ue_delay_pressure.get(ue_id)
-            if pressure is None:
-                return 1.0
-            pressures.append(pressure)
+            higher_priority = self.priority_of_ue(ue_id)
+            protection_factor = HIGHER_PRIORITY_PROTECTION_FACTORS[
+                higher_priority
+            ]
+            raw_pressure = self.ue_delay_pressure.get(ue_id)
+            if raw_pressure is None:
+                raw_pressure = 1.0
+            pressures.append(raw_pressure * protection_factor)
 
         return max(pressures)
 
@@ -834,7 +853,6 @@ class PriorityPrbXapp(xAppBase):
             for ue_id in sorted(self.known_ues):
                 priority = self.priority_of_ue(ue_id)
                 ue_slice = self.ue_slice_map.get(ue_id, "unknown")
-                #target_cap = self.target_cap_for_priority(priority)
                 target_cap = self.displayed_target_cap_for_ue(ue_id)
                 thp = self.ue_dl_thp.get(ue_id, None)
                 delay_ms = self.ue_dl_delay_ms.get(ue_id, None)
@@ -979,7 +997,7 @@ def parse_args():
         choices=["best_effort", "medium", "high"],
     )
 
-    parser.add_argument("--medium_min_cap_at_max_pressure", type=int, default=70)
+    parser.add_argument("--medium_min_cap_at_max_pressure", type=int, default=50)
     parser.add_argument("--best_effort_min_cap_at_max_pressure", type=int, default=20)
     parser.add_argument("--high_min_cap_at_max_pressure", type=int, default=100)
 
