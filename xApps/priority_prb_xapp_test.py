@@ -81,8 +81,6 @@ PRIORITY_THROUGHPUT_WEIGHTS = {
 HIGHER_PRIORITY_PROTECTION_FACTORS = {
     "high": 1.0,
     "medium": 2.0 / 3.0,
-    #"medium": 0.85,
-    "best_effort": 1.0 / 3.0,
 }
 
 def normalize_sd(sd):
