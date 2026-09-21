@@ -1,0 +1,72 @@
+
+=== QoS weight experiment metrics ===
+Weight set: balanced
+Configured weights: PRB=0.34, competition=0.33, delay=0.33
+Normalized weights: PRB=0.3400, competition=0.3300, delay=0.3300
+Cell capacity reference: 28.000 Mbit/s
+Included scenarios: 9/13
+xApp CSV: weight_selection_run_2/balanced_2/balanced_34_33_33_2.csv
+Markers: weight_selection_run_2/balanced_2/20260911_134021_balanced_2/scenario_markers.csv
+Iperf directory: weight_selection_run_2/balanced_2/20260911_134021_balanced_2
+Output CSV: balanced_2_results.csv
+
+Aggregate comparison metrics (no composite score):
+weighted satisfaction: 0.8494
+protected satisfaction: 0.8643
+best-effort satisfaction: 0.7959
+cell-capacity utilization: 0.9216
+demand/capacity efficiency: 0.9696
+controls per minute: 1.0063
+iperf weighted satisfaction: 0.8259
+iperf protected satisfaction: 0.8401
+iperf cell-capacity utilization: 0.8964
+iperf demand/capacity efficiency: 0.9520
+iperf packet loss: 22.8511
+
+Network outcomes from xApp/KPM data:
+                    Scenario  Included  H_sat  M_sat  BE_sat  W_sat  P_sat  DL_Mbps  Cell_util  Demand_eff
+      00a_single_best_effort     False    NaN    NaN   0.824  0.824    NaN   28.833      1.000       1.000
+           00b_single_medium     False    NaN  0.824     NaN  0.824  0.824   28.833      1.000       1.000
+             00c_single_high     False  0.824    NaN     NaN  0.824  0.824   28.833      1.000       1.000
+          01_underload_equal      True  1.000  1.000   1.000  1.000  1.000   15.916      0.568       1.000
+      02_near_capacity_equal      True  1.000  1.000   1.000  1.000  1.000   28.696      1.000       1.000
+  03_moderate_overload_equal      True  0.961  0.611   0.414  0.753  0.821   29.797      1.000       1.000
+          04_saturated_equal     False  0.405  0.265   0.181  0.321  0.349   29.798      1.000       1.000
+        05_best_effort_heavy      True  1.000  1.000   0.590  0.932  1.000   25.382      0.906       0.906
+             06_medium_heavy      True  1.000  0.599   1.000  0.866  0.840   25.604      0.914       0.914
+               07_high_heavy      True  0.589  1.000   1.000  0.794  0.753   25.348      0.905       0.905
+    08_pair_best_effort_high      True  0.852    NaN   0.636  0.798  0.852   29.769      1.000       1.000
+  09_pair_best_effort_medium      True    NaN  0.760   0.727  0.749  0.760   29.731      1.000       1.000
+10_pair_medium_high_optional      True  0.763  0.735     NaN  0.752  0.752   29.962      1.000       1.000
+
+Iperf receiver results:
+                    Scenario  Goodput_Mbps  W_sat  Cell_util  H_loss_%  M_loss_%  BE_loss_%
+      00a_single_best_effort        27.200  0.777      0.971       NaN       NaN     21.375
+           00b_single_medium        27.219  0.778      0.972       NaN    21.319        NaN
+             00c_single_high        27.191  0.777      0.971    21.399       NaN        NaN
+          01_underload_equal        15.000  1.000      0.536     0.000     0.000      0.000
+      02_near_capacity_equal        27.000  1.000      0.964     0.000     0.000      0.000
+  03_moderate_overload_equal        28.070  0.710      1.000     4.645    38.631     56.554
+          04_saturated_equal        28.082  0.304      1.000    61.545    74.212     81.640
+        05_best_effort_heavy        23.927  0.926      0.855     0.000     0.000     43.073
+             06_medium_heavy        24.122  0.855      0.862     0.000    42.225      0.000
+               07_high_heavy        23.877  0.778      0.853    43.242     0.000      0.000
+    08_pair_best_effort_high        27.986  0.751      0.999    17.445       NaN     37.528
+  09_pair_best_effort_medium        27.980  0.705      0.999       NaN    25.957     28.948
+10_pair_medium_high_optional        28.227  0.708      1.000    25.569    28.097        NaN
+
+Controller diagnostics:
+                    Scenario  Delay_pressure  Controls_min
+      00a_single_best_effort           1.000         0.000
+           00b_single_medium           1.000         0.000
+             00c_single_high           1.000         0.000
+          01_underload_equal           0.000         0.000
+      02_near_capacity_equal           0.000         0.000
+  03_moderate_overload_equal           1.000         2.264
+          04_saturated_equal           1.000         2.264
+        05_best_effort_heavy           0.333         0.000
+             06_medium_heavy           0.333         1.132
+               07_high_heavy           0.333         2.264
+    08_pair_best_effort_high           1.000         1.132
+  09_pair_best_effort_medium           1.000         1.132
+10_pair_medium_high_optional           1.000         1.132
