@@ -5,8 +5,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 UE_SLICE_MAP_FILE="${UE_SLICE_MAP_FILE:-${SCRIPT_DIR}/ue_slice_map.json}"
 
-SERVER_IP="${SERVER_IP:-192.168.81.178}"
-DURATION="${DURATION:-30}"
+SERVER_IP="${SERVER_IP:-10.45.0.1}"
+DURATION="${DURATION:-60}"
 PRE_SLEEP="${PRE_SLEEP:-5}"
 POST_SLEEP="${POST_SLEEP:-5}"
 
@@ -456,17 +456,17 @@ run_priority_scenario_parallel \
 
 run_priority_scenario_parallel \
     "05_best_effort_heavy" \
-    "35M" "5M" "5M" \
+    "25M" "5M" "5M" \
     "Best-effort is the heavy source. Tests strongest throttling and possible utilization tradeoff."
 
 run_priority_scenario_parallel \
     "06_medium_heavy" \
-    "5M" "35M" "5M" \
+    "5M" "25M" "5M" \
     "Medium is the heavy source. Expected behaviour between best-effort-heavy and high-heavy."
 
 run_priority_scenario_parallel \
     "07_high_heavy" \
-    "5M" "5M" "35M" \
+    "5M" "5M" "25M" \
     "High is the heavy source. Expected: no high-priority ceiling and highest aggregate utilization."
 
 # ------------------------------------------------------------
@@ -475,18 +475,18 @@ run_priority_scenario_parallel \
 
 run_priority_scenario_parallel \
     "08_pair_best_effort_high" \
-    "35M" "0" "35M" \
+    "20M" "0" "20M" \
     "Two backlogged UEs. Most important pairwise priority-protection test."
 
 run_priority_scenario_parallel \
     "09_pair_best_effort_medium" \
-    "35M" "35M" "0" \
+    "20M" "20M" "0" \
     "Tests whether the best-effort ceiling releases resources to medium."
 
 run_priority_scenario_parallel \
     "10_pair_medium_high_optional" \
-    "0" "35M" "35M" \
-    "Negative/control case: medium cap may not bind because its natural share is below 60%."
+    "0" "20M" "20M" \
+    "Negative/control case: medium cap may not bind because its natural share is below 70%."
 
 # --------------------------------------------------------------------
 # Staggered dynamic scenario
