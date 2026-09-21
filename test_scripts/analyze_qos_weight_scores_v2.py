@@ -834,8 +834,8 @@ def main() -> None:
     parser.add_argument(
         "--cell_capacity_mbps",
         type=float,
-        default=30.0,
-        help="Measured reference DL capacity. Default: 30 Mbit/s.",
+        default=28.0,
+        help="Measured reference DL capacity.",
     )
     parser.add_argument(
         "--iperf_dir",
@@ -891,7 +891,7 @@ def main() -> None:
     parser.add_argument("--time_offset", type=float, default=0.0)
     parser.add_argument(
         "--exclude_scenario_regex",
-        default=r"^00",
+        default=r"^(00|04_)",
         help=(
             "Scenario-name regex excluded from aggregate comparison. "
             "Default excludes 00* calibration scenarios; use an empty "
