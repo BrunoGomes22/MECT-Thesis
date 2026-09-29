@@ -891,7 +891,7 @@ def main() -> None:
     parser.add_argument("--time_offset", type=float, default=0.0)
     parser.add_argument(
         "--exclude_scenario_regex",
-        default=r"^(00|04_)",
+        default=r"^(00)",
         help=(
             "Scenario-name regex excluded from aggregate comparison. "
             "Default excludes 00* calibration scenarios; use an empty "
