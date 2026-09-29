@@ -14,8 +14,11 @@
 
 ### Slide Dissertação Bruno
 
-(Explicar em que consiste)
+(Talvez mostrar arquitetura do meu setup ORAN)
 
+(Explicar em que consiste o meu projeto)
+
+(E depois explicar o flow mais ou menos como está aqui abaixo)
 1. Mostra o setup atual que segue a arquitetura ORAN
 2. Há uma Near-RT RIC no qual reside uma xApp
 3. a RIC comunica com a DU através da interface E2
