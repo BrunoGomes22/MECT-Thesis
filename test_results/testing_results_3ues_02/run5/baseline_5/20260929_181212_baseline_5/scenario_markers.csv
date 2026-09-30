@@ -1,0 +1,13 @@
+scenario,start_ts,end_ts,be_offered,medium_offered,high_offered,ue1_bw,ue1_priority,ue2_bw,ue2_priority,ue3_bw,ue3_priority,notes
+"01_underload_equal","1790701938.450964438","1790701998.828321165","5M","5M","5M","5M","best_effort","5M","medium","5M","high",""
+"02_near_capacity_equal","1790702008.835396149","1790702073.452310170","10M","10M","10M","10M","best_effort","10M","medium","10M","high",""
+"03_moderate_overload_equal","1790702083.459962784","1790702148.943273424","15M","15M","15M","15M","best_effort","15M","medium","15M","high",""
+"04_best_effort_heavy","1790702158.951049541","1790702221.073247760","25M","5M","5M","25M","best_effort","5M","medium","5M","high",""
+"05_medium_heavy","1790702231.080545293","1790702293.273844755","5M","25M","5M","5M","best_effort","25M","medium","5M","high",""
+"06_high_heavy","1790702303.279033842","1790702365.328767792","5M","5M","25M","5M","best_effort","5M","medium","25M","high",""
+"07_pair_best_effort_high","1790702375.334733640","1790702439.112157651","20M","0","20M","20M","best_effort","0","medium","20M","high",""
+"08_pair_best_effort_medium","1790702449.118993032","1790702512.802580310","20M","20M","0","20M","best_effort","20M","medium","0","high",""
+"09_pair_medium_high_optional","1790702522.809174977","1790702586.511118007","0","20M","20M","0","best_effort","20M","medium","20M","high",""
+"10_overload_best_effort","1790702596.517782852","1790702662.024738403","20M","15M","10M","20M","best_effort","15M","medium","10M","high",""
+"11_overload_medium","1790702672.032482292","1790702737.212361523","10M","20M","15M","10M","best_effort","20M","medium","15M","high",""
+"12_overload_high","1790702747.219455964","1790702812.312429778","10M","15M","20M","10M","best_effort","15M","medium","20M","high",""
