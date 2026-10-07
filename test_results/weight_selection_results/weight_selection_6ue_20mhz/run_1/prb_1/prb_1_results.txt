@@ -1,0 +1,55 @@
+
+=== Six-UE QoS experiment metrics ===
+Weight set: prb
+Discovered UEs: ue1, ue2, ue3, ue4, ue5, ue6
+Configured weights: PRB=0.6, competition=0.2, delay=0.2
+Normalized weights: PRB=0.6000, competition=0.2000, delay=0.2000
+Cell capacity reference: 54.400 Mbit/s
+Included scenarios: 4/4
+xApp CSV: /home/pca/weight_set_optimization/weight_selection_results/weight_selection_6ue_20mhz/run_1/prb_1/prb_60_20_20_1.csv
+Markers: /home/pca/weight_set_optimization/weight_selection_results/weight_selection_6ue_20mhz/run_1/prb_1/20261006_220505_prb_1/scenario_markers.csv
+Iperf directory: /home/pca/weight_set_optimization/weight_selection_results/weight_selection_6ue_20mhz/run_1/prb_1/20261006_220505_prb_1
+Scenario CSV: /home/pca/weight_set_optimization/weight_selection_results/weight_selection_6ue_20mhz/run_1/prb_1/prb_1_results.csv
+Per-UE CSV: /home/pca/weight_set_optimization/weight_selection_results/weight_selection_6ue_20mhz/run_1/prb_1/prb_1_per_ue_results.csv
+
+Aggregate comparison metrics (no composite score):
+weighted satisfaction: 0.9109
+protected satisfaction: 0.9286
+best-effort satisfaction: 0.8296
+cell-capacity utilization: 1.0000
+demand/capacity efficiency: 1.0000
+controls per minute: 15.8491
+controls per active UE per minute: 2.7358
+iperf weighted satisfaction: 0.8561
+iperf protected satisfaction: 0.8745
+iperf cell-capacity utilization: 1.0000
+iperf demand/capacity efficiency: 1.0000
+iperf packet loss: 12.9528
+
+Network outcomes from xApp/KPM data:
+                       Scenario  Included  UEs  H_sat  M_sat  BE_sat  W_sat  P_sat  DL_Mbps  Cell_util  Demand_eff
+  01_weight_near_capacity_equal      True    6  1.000  1.000   0.874  0.979  1.000   61.222      1.000       1.000
+       02_weight_overload_equal      True    6  1.000  0.723   0.607  0.842  0.889   61.636      1.000       1.000
+  03_weight_overload_high_heavy      True    6  0.888  1.000   1.000  0.944  0.933   60.887      1.000       1.000
+04_weight_pair_best_effort_high      True    4  0.892    NaN   0.837  0.878  0.892   60.519      1.000       1.000
+
+Iperf receiver results:
+                       Scenario  Goodput_Mbps  W_sat  Cell_util  H_loss_%  M_loss_%  BE_loss_%
+  01_weight_near_capacity_equal        55.113  0.954      1.000     0.000     0.000     13.705
+       02_weight_overload_equal        55.339  0.776      1.000     1.590    29.720     39.872
+  03_weight_overload_high_heavy        54.822  0.900      1.000    14.417     0.000      0.000
+04_weight_pair_best_effort_high        54.653  0.794      1.000    15.649       NaN     20.650
+
+Within-priority endpoint satisfaction fairness:
+                       Scenario  H_n  H_min  H_Jain  M_n  M_min  M_Jain  BE_n  BE_min  BE_Jain
+  01_weight_near_capacity_equal    2  0.998   1.000    2  0.969   1.000     2   0.757    0.999
+       02_weight_overload_equal    2  0.941   1.000    2  0.647   1.000     2   0.540    1.000
+  03_weight_overload_high_heavy    2  0.801   1.000    2  1.000   1.000     2   1.000    1.000
+04_weight_pair_best_effort_high    2  0.807   1.000    0    NaN     NaN     2   0.755    1.000
+
+Controller diagnostics:
+                       Scenario  Delay_pressure  Controls_min  Controls_UE_min
+  01_weight_near_capacity_equal           0.888        40.755            6.792
+       02_weight_overload_equal           1.000         9.057            1.509
+  03_weight_overload_high_heavy           0.333         9.057            1.509
+04_weight_pair_best_effort_high           1.000         4.528            1.132
