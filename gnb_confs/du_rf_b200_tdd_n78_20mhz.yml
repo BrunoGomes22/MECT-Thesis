@@ -1,0 +1,71 @@
+# Example config for a DU with one 20MHz TDD cell using a USRP as RF frontend.
+f1ap:
+  cu_cp_addr: 192.168.81.239
+  bind_addr: 192.168.81.209
+
+f1u:
+  socket:
+    -
+      bind_addr: 192.168.81.209
+
+ru_sdr:
+  device_driver: uhd
+  device_args: type=b200,num_recv_frames=64,num_send_frames=64
+  srate: 23.04
+  otw_format: sc12  
+  tx_gain: 80
+  rx_gain: 40
+
+cell_cfg:
+  dl_arfcn: 650000
+  band: 78
+  channel_bandwidth_MHz: 20
+  common_scs: 30
+  plmn: "00101"
+  tac: 7
+  pci: 1
+
+  slicing:
+    - sst: 1
+      sched_cfg:
+        min_prb_policy_ratio: 40
+        max_prb_policy_ratio: 60
+    - sst: 1
+      sd: 1
+      sched_cfg:
+        min_prb_policy_ratio: 10
+        max_prb_policy_ratio: 30
+    - sst: 1
+      sd: 2
+      sched_cfg:
+        min_prb_policy_ratio: 30
+        max_prb_policy_ratio: 70
+
+log:
+  filename: /tmp/du.log
+  all_level: warning
+
+e2:
+  enable_du_e2: true                # Enable DU E2 agent (one for each DU instance)
+  e2sm_kpm_enabled: true            # Enable KPM service module
+  e2sm_rc_enabled: true             # Enable RC service module
+  addr: 192.168.81.202              # RIC IP address
+  bind_addr: 192.168.81.209         # Sets the local IP address to bind for the RIC
+  port: 36421                       # RIC port
+
+pcap:
+  mac_enable: false
+  mac_filename: /tmp/du_mac.pcap
+  f1ap_enable: true
+  f1ap_filename: /tmp/du_f1ap.pcap
+  f1u_enable: false
+  f1u_filename: /tmp/du_f1u.pcap
+  e2ap_enable: true                              # Set to true to enable E2AP PCAPs.
+  e2ap_du_filename: /tmp/gnb_du_e2ap.pcap        # Path where the DU E2AP PCAP is stored.
+
+metrics:
+  layers:
+    enable_rlc: true                # Enable RLC metrics
+    enable_sched: true              # Enable DU scheduler metrics
+  periodicity:
+    du_report_period: 1000          # Set DU statistics report period to 1s
