@@ -1049,21 +1049,21 @@ def parse_args():
     parser.add_argument(
         "--w_prb",
         type=float,
-        default=0.40, 
+        default=0.34, 
         help="Weight for PRB pressure in congestion score.",
     )
 
     parser.add_argument(
         "--w_competition",
         type=float,
-        default=0.35, 
+        default=0.33, 
         help="Weight for competition pressure in congestion score.",
     )
 
     parser.add_argument(
         "--w_delay",
         type=float,
-        default=0.25, 
+        default=0.33, 
         help="Weight for delay pressure in congestion score.",
     )
 
