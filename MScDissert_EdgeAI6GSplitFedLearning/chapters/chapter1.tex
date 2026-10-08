@@ -1,0 +1,119 @@
+\chapter{Introduction}%
+\label{chapter:introduction}
+
+%\begin{introduction}
+%A short description of the chapter.
+
+%A memorable quote can also be used.
+%\end{introduction}
+
+\section{Scope}
+The scope of this dissertation is the study and evaluation of distributed artificial intelligence techniques applied to next-generation mobile networks, with a particular focus on the Radio Access Network (RAN). The work focuses on emerging 6G networks and uses the Open Radio Access Network (O-RAN) architecture as an enabling platform for intelligent and flexible network control.
+
+Specifically, this dissertation explores how machine learning algorithms can be deployed closer to the network edge by taking advantage of the O-RAN architecture to distribute intelligence across different network components. Moreover, the work focuses on machine learning paradigms that reduce dependency on centralized processing while maintaining efficiency, scalability, and data privacy.
+
+\section{Motivation}
+
+Next-generation mobile networks promise to deliver highly demanding services, such as ultra-low-latency communications, massive connectivity, and intelligent automation. To meet these requirements, mobile networks must evolve from static, rule-based systems into adaptive and autonomous systems capable of learning from network conditions in real time.
+
+However, current network optimization strategies depend mainly on centralized artificial intelligence models, where large volumes of data are collected and processed in the cloud. As networks scale and become more diverse, this centralized approach becomes a limiting factor, leading to increased latency, higher communication overhead, and reduced data privacy.
+
+The O-RAN architecture is a decentralized solution which divides the RAN into several functional components and interconnects them through standardized interfaces. This architecture allows for the integration of intelligence directly within the RAN, enabling distributed and edge-based learning approaches. Understanding how these approaches can be incorporated within the O-RAN ecosystem, while addressing scalability, latency, and privacy constraints, are the main motivation for this dissertation.
+
+\section{Research Question}
+
+How can distributed learning paradigms enabled by the O-RAN architecture be applied to support intelligent and scalable operations in future mobile networks while reducing dependence on centralized data processing?
+
+\vspace{3mm}
+
+To address this question, the dissertation investigates the application of Federated Learning and Split Learning mechanisms for distributing model training and inference across different RAN components. The work analyses how these learning paradigms interact with the functional split of the RAN and evaluates their potential to make future mobile networks more intelligent, efficient and privacy-aware.
+
+\section{Objectives}
+
+The main objectives of this dissertation are:
+\begin{itemize}
+    \item To analyze the limitations of centralized artificial intelligence approaches in the context of future 6G networks.
+    \item To study the O-RAN architecture and identify suitable points for the integration of learning-based algorithms.
+    \item To investigate Federated Learning and Split Learning as distributed training paradigms applied to the RAN.
+    \item To evaluate how these learning paradigms can reduce communication overhead, latency, and data exposure.
+    \item To assess the feasibility of deploying distributed intelligence in a realistic network environment using open-source platforms.
+\end{itemize}
+
+\section{Document Structure}
+
+
+\section{Acronyms}
+
+Primeira e seguintes referências: \ac{h2o}, \ac{h2o}
+
+Plural, acrónimo expandido e curto: \acp{h2o}, \acl{h2o}, \acs{h2o}
+
+Com citação\footnote{Necessária entrada na bibliografia}: \ac{adsl}, \ac{adsl}
+
+
+\section{Fontes}
+
+\begin{itemize}
+\item{\tiny Tiny}
+\item{\scriptsize Scriptsize}
+\item{\footnotesize Footnotes}
+\item{\small Small}
+\item{\normalsize Normal}
+\item{\large large}
+\item{\Large Large}
+\item{\LARGE LARGE}
+\item{\huge huge}
+\item{\Huge Huge}
+\end{itemize}
+
+\section{Unidades}
+
+Utilizando o pacote \verb|siunitx| é possível utilizar unidades do Sistema Internacional. Exemplo: a aceleração da gravidade é de \SI{9.8}{\metre\per\second\squared} e um ficheiro ocupa \SI{1}{\mebi\byte}. 
+
+\section{Code Blocks}
+%\lipsum[5]
+Uma listagem pode ser apresentada com o ambiente \texttt{listing}, que é um float (objeto flutuante, tal como uma figura ou uma tabela).
+
+A listagem em Código~\ref{lbl:snippet-test} mostra um exemplo em C.
+
+\begin{listing}[h]
+\begin{minted}{c}
+
+#include <stdio.h>
+#define N 10
+/* Block
+ * comment */
+ 
+int main()
+{
+    int i;
+ 
+    // Line comment.
+    puts("Hello world!");
+ 
+    for (i = 0; i < N; i++)
+    {
+        puts("LaTeX is also great for programmers!");
+    }
+ 
+    return 0;
+}
+\end{minted}
+\caption{This caption appears below the code.}
+\label{lbl:snippet-test}
+\end{listing}
+
+%\lipsum[5]
+
+\section{Citações}
+
+Algumas formas distintas de citar:
+
+\begin{itemize}
+    \item \textbf{Apenas referência}:~\cite{rfc44}
+    \item \textbf{Apenas data}:~\citedate{rfc44}
+    \item \textbf{Apenas ano}:~\citeyear{rfc44}
+    \item \textbf{Apenas autor}:~\citeauthor{rfc44}
+    \item \textbf{Apenas editor}:\citelist{rfc44}{organization}
+    \item \textbf{Autor e referência}:\citet{rfc44}
+\end{itemize}
