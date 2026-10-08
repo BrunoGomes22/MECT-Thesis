@@ -91,23 +91,26 @@ SCENARIO_ORDER = (
     "12_overload_high",
     "13_heterogeneous_equal_aggregate",
 )
-SCENARIO_LABELS = {
-    "01_underload_equal": "01 Equal\n5/5/5",
-    "02_near_capacity_equal": "02 Equal\n9/9/9",
-    "03_moderate_overload_equal": "03 Equal overload\n10/10/10",
-    "04_best_effort_heavy": "04 BE-heavy\n14/8/8",
-    "05_medium_heavy": "05 M-heavy\n8/14/8",
-    "06_high_heavy": "06 H-heavy\n8/8/14",
-    "07_pair_best_effort_high": "07 BE–H\n15/0/15",
-    "08_pair_best_effort_medium": "08 BE–M\n15/15/0",
-    "09_pair_medium_high_optional": "09 M–H\n0/15/15",
-    "10_overload_best_effort": "10 BE-led\n12/10/8",
-    "11_overload_medium": "11 M-led\n8/12/10",
-    "12_overload_high": "12 H-led\n8/10/12",
-    "13_heterogeneous_equal_aggregate": (
-        "13 Heterogeneous\n3.33/6.67 pairs"
-    ),
+SCENARIO_SHORT_TITLES = {
+    "01_underload_equal": "01 Equal",
+    "02_near_capacity_equal": "02 Equal",
+    "03_moderate_overload_equal": "03 Equal overload",
+    "04_best_effort_heavy": "04 BE-heavy",
+    "05_medium_heavy": "05 M-heavy",
+    "06_high_heavy": "06 H-heavy",
+    "07_pair_best_effort_high": "07 BE–H",
+    "08_pair_best_effort_medium": "08 BE–M",
+    "09_pair_medium_high_optional": "09 M–H",
+    "10_overload_best_effort": "10 BE-led",
+    "11_overload_medium": "11 M-led",
+    "12_overload_high": "12 H-led",
+    "13_heterogeneous_equal_aggregate": "13 Heterogeneous",
 }
+# Populated from the analyzed offered-load fields in ``main``. Deriving these
+# values prevents 10-MHz labels from being reused accidentally for another
+# cell configuration that follows the same scenario naming convention.
+SCENARIO_LABELS = dict(SCENARIO_SHORT_TITLES)
+SCENARIO_LOAD_TEXT: dict[str, str] = {}
 REPRESENTATIVE_SCENARIOS = (
     "01_underload_equal",
     "03_moderate_overload_equal",
@@ -275,6 +278,38 @@ def mean_sd(values: Iterable[object]) -> tuple[float, float]:
 def mean_or_none(values: Iterable[Optional[float]]) -> Optional[float]:
     numeric = [float(value) for value in values if value is not None]
     return statistics.mean(numeric) if numeric else None
+
+
+def configure_scenario_labels(
+    priority_rows: list[dict[str, object]],
+) -> None:
+    """Derive aggregate BE/M/H load labels from the analyzer output."""
+    priority_display_order = ("best_effort", "medium", "high")
+
+    for scenario in SCENARIO_ORDER:
+        offered_by_priority: dict[str, float] = {}
+        for priority in priority_display_order:
+            values = {
+                float(row["offered_mbps"])
+                for row in priority_rows
+                if row["scenario"] == scenario
+                and row["priority"] == priority
+            }
+            if len(values) != 1:
+                raise ValueError(
+                    "Inconsistent offered load while constructing plot label "
+                    f"for {scenario}/{priority}: {sorted(values)}"
+                )
+            offered_by_priority[priority] = values.pop()
+
+        load_text = "/".join(
+            f"{offered_by_priority[priority]:g}"
+            for priority in priority_display_order
+        )
+        SCENARIO_LOAD_TEXT[scenario] = load_text
+        SCENARIO_LABELS[scenario] = (
+            f"{SCENARIO_SHORT_TITLES[scenario]}\n{load_text}"
+        )
 
 
 def jain_fairness(values: Sequence[float]) -> Optional[float]:
@@ -895,6 +930,7 @@ def plot_priority_metric(
     stem: str,
     *,
     percent_axis: bool = False,
+    percent_ceiling: Optional[float] = None,
     log_axis: bool = False,
     include_offered: bool = False,
 ) -> None:
@@ -961,7 +997,11 @@ def plot_priority_metric(
                 FuncFormatter(lambda value, _: f"{value:g}")
             )
         elif percent_axis:
-            ax.set_ylim(0.0, max(105.0, upper))
+            if percent_ceiling is not None:
+                percent_upper = percent_ceiling
+            else:
+                percent_upper = min(105.0, max(5.0, upper))
+            ax.set_ylim(0.0, percent_upper)
             ax.yaxis.set_major_formatter(PercentFormatter(100.0))
         else:
             ax.set_ylim(0.0, upper)
@@ -1020,7 +1060,7 @@ def plot_cell_performance(
                 alpha=0.75,
             )
         else:
-            ax.set_ylim(0.0, max(105.0, linear_upper(values, floor=100.0)))
+            ax.set_ylim(0.0, 105.0)
             ax.yaxis.set_major_formatter(PercentFormatter(100.0))
         ax.set_ylabel(ylabel)
         style_scenario_axis(ax, panel == len(panels) - 1)
@@ -1414,8 +1454,10 @@ def plot_control_dynamics(
     cap_ax.set_xlabel("Time since traffic start (s)")
     cap_ax.legend(loc="lower right", ncol=3, frameon=True)
 
+    offered_load = SCENARIO_LOAD_TEXT.get(DYNAMICS_SCENARIO, "unknown")
     fig.suptitle(
-        "Heuristic control dynamics — scenario 03 (aggregate 10/10/10 Mbit/s)",
+        "Heuristic control dynamics — scenario 03 "
+        f"(aggregate BE/M/H: {offered_load} Mbit/s)",
         fontsize=16,
         fontweight="bold",
         y=0.985,
@@ -1535,7 +1577,7 @@ def plot_per_ue_comparison(
     all_values = finite_values(rows, field)
     offered_values = finite_values(rows, "offered_mbps") if offered_markers else []
     upper = (
-        max(105.0, linear_upper(all_values, floor=100.0))
+        105.0
         if percent_axis
         else linear_upper(all_values + offered_values, floor=1.0)
     )
@@ -1816,7 +1858,8 @@ def write_notes(
         f"Input root: {input_root}",
         f"Matched run pairs: {len(runs)} ({', '.join(map(str, runs))})",
         "Primary scenarios: 01-13",
-        "Scenario loads shown as aggregate best-effort/medium/high Mbit/s",
+        "Scenario loads are derived from analyzer output and shown as aggregate "
+        "best-effort/medium/high Mbit/s",
         "Goodput, satisfaction, loss, and fairness source: receiver-side iPerf",
         "Priority satisfaction: aggregate priority goodput / aggregate priority demand",
         "Per-UE satisfaction: UE goodput / UE demand, bounded at 1",
@@ -1851,6 +1894,7 @@ def main() -> None:
         fairness_rows,
         warnings,
     ) = load_data(experiments)
+    configure_scenario_labels(priority_rows)
     dynamics_rows = load_control_dynamics(experiments)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -1873,6 +1917,7 @@ def main() -> None:
         "Per-priority aggregate demand satisfaction",
         "02_priority_aggregate_satisfaction",
         percent_axis=True,
+        percent_ceiling=105.0,
     )
     plot_priority_metric(
         priority_rows,
