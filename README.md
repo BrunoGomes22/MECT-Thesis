@@ -121,7 +121,7 @@ Inactive UEs, and every UE when only one is active, get 100 %. Each cap is sent 
 MECT-Thesis/
 ├── xApps/                     # Near-RT RIC xApps (OSC python_xapp_runner)
 ├── gnb_confs/                 # srsRAN gNB / DU configurations
-├── srsue_confs/               # srsUE configurations (ZMQ, 10 MHz)
+├── srsue_confs/               # srsUE configurations (ZMQ, 10 MHz and 20 MHz)
 ├── multi-ue-broker_scripts/   # GNU Radio flowgraphs connecting N srsUEs to one DU
 ├── test_scripts/
 │   ├── test_matrix_scripts/   # Automated scenario runners (iPerf3 + markers)
