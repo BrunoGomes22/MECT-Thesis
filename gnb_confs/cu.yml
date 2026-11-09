@@ -1,0 +1,57 @@
+# Example config for a locally deployed CU listening on the localhost interface for a DU connection
+
+cu_cp:
+  inactivity_timer: 7200
+  amf:
+    addr: 192.168.81.181
+    bind_addr: 192.168.81.239
+    supported_tracking_areas:
+      - tac: 7
+        plmn_list:
+          - plmn: "00101"
+            tai_slice_support_list:
+              - sst: 1
+              - sst: 1
+                sd: 1
+              - sst: 1
+                sd: 2
+  f1ap:
+    bind_addr: 192.168.81.239
+
+cu_up:
+  f1u:
+    socket:
+      -
+        bind_addr: 192.168.81.240
+
+
+e2:
+  enable_cu_cp_e2: true
+  enable_cu_up_e2: true
+  addr: 192.168.81.202
+  port: 36421
+  bind_addr: 192.168.81.239
+  e2sm_kpm_enabled: true
+  e2sm_rc_enabled: true
+
+metrics:
+  layers:
+    enable_pdcp: true
+    enable_rrc: true
+  periodicity:
+    cu_cp_report_period: 1000
+    cu_up_report_period: 1000
+
+
+log:
+  #filename: /tmp/cu.log
+  filename: stdout
+  all_level: warning
+  e2ap_level: info
+
+pcap:
+  ngap_enable: true
+  ngap_filename: /tmp/cu_ngap.pcap
+  #e2ap_cu_cp_filename: /tmp/cu_cp_e2ap.pcap # Optional TEXT (/tmp/cu_cp_e2ap.pcap). Path for E2AP CU-CP PCAPs.
+  #e2ap_cu_up_filename: /tmp/cu_up_e2ap.pcap # Optional TEXT (/tmp/cu_up_e2ap.pcap). Path for E2AP CU-UP PCAPs.
+  #e2ap_enable: true                    # Optional BOOLEAN (false). Enable/disable E2AP packet capture. Supported: [false, true].
