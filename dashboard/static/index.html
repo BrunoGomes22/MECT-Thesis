@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>srsRAN Testbed</title>
+<meta name="description" content="Live status, metrics, logs and control of the srsRAN testbed (Open5GS, OSC RIC, CU/DU, srsUEs)">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%230b0b0b'/%3E%3Cpath d='M5 15c2-6 4-6 7 0s5 6 7 0' stroke='%23fff' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9.5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3.5l9.5 16.5h-19z"/><path d="M12 10v4M12 17.2v.01"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5h5v5h-5z"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></symbol>
+  <symbol id="i-dash" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8.5 12h7"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.7M12 16.8v.01"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z"/></symbol>
+  <symbol id="i-square" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/></symbol>
+  <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3.5v8"/><path d="M7 6.5a7.5 7.5 0 1 0 10 0"/></symbol>
+  <symbol id="i-restart" viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4.5v4h4"/></symbol>
+  <symbol id="i-log" viewBox="0 0 24 24"><path d="M6 3.5h8.5L19 8v12.5H6z"/><path d="M14 3.5V8h5M9 12h7M9 15.5h7M9 19h4"/></symbol>
+  <symbol id="i-spinner" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9"/></symbol>
+  <symbol id="i-wave" viewBox="0 0 24 24"><path d="M3 15c2.5-8 5-8 9 0s6.5 8 9 0"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19.5h14"/></symbol>
+</svg>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo"><svg class="icon"><use href="#i-wave"/></svg></span>
+    <div>
+      <h1>srsRAN Testbed</h1>
+      <div class="host" id="host"></div>
+    </div>
+  </div>
+  <div class="summary" id="summary" aria-live="polite"></div>
+  <div class="top-actions">
+    <span class="orch" id="orch"></span>
+    <span class="conn" id="conn"><span class="dot"></span><span>connecting…</span></span>
+    <button class="icon-btn" id="theme" type="button" aria-label="Toggle light/dark theme"><svg class="icon"><use href="#i-moon"/></svg></button>
+  </div>
+</header>
+
+<nav class="tabs" role="tablist" aria-label="Sections">
+  <a href="#live" role="tab" id="tab-live">Live</a>
+  <a href="#components" role="tab" id="tab-components">Components</a>
+  <a href="#metrics" role="tab" id="tab-metrics">E2 metrics</a>
+  <a href="#logs" role="tab" id="tab-logs">Logs</a>
+  <a href="#tasks" role="tab" id="tab-tasks">Tasks</a>
+</nav>
+
+<main>
+  <section id="view-live" class="view" role="tabpanel" aria-labelledby="tab-live">
+    <div class="control-bar">
+      <div class="control-main">
+        <button class="btn primary big" id="btn-start-all" type="button"><svg class="icon"><use href="#i-play"/></svg>Start all</button>
+        <button class="btn danger" id="btn-stop-ran" type="button"><svg class="icon"><use href="#i-square"/></svg>Stop RAN</button>
+      </div>
+      <div class="comp-buttons" id="comp-buttons" role="group" aria-label="Components: click for details, power button to start or stop"></div>
+    </div>
+    <div class="live-grid">
+      <section class="diagram-card" aria-label="Live topology">
+        <div class="diagram-head">
+          <h2>Live topology</h2>
+          <div class="topo-legend" id="topo-legend"></div>
+        </div>
+        <div class="diagram" id="diagram"><div class="log-empty">Loading…</div></div>
+      </section>
+      <aside class="detail-panel" id="detail" aria-live="polite"></aside>
+    </div>
+    <div class="kpis" id="kpis"></div>
+    <div class="overview-charts" id="ov-charts"></div>
+  </section>
+
+  <section id="view-components" class="view" role="tabpanel" aria-labelledby="tab-components" hidden>
+    <div id="groups"></div>
+  </section>
+
+  <section id="view-metrics" class="view" role="tabpanel" aria-labelledby="tab-metrics" hidden>
+    <div class="filters">
+      <label>Window
+        <span class="seg" id="range" role="group" aria-label="Time window">
+          <button type="button" data-s="60">1 min</button>
+          <button type="button" data-s="300">5 min</button>
+          <button type="button" data-s="900">15 min</button>
+          <button type="button" data-s="1800">30 min</button>
+        </span>
+      </label>
+      <button class="btn small" id="pause" type="button" aria-pressed="false">Pause</button>
+      <span class="note" id="metrics-note"></span>
+    </div>
+    <h2>Per UE</h2>
+    <div class="chart-grid" id="ue-charts"></div>
+    <h2>Per slice</h2>
+    <div class="slice-grid" id="slice-charts"></div>
+    <h2>Current values</h2>
+    <div class="table-wrap"><table class="data" id="ue-table"></table></div>
+    <p class="note" id="ue-table-note"></p>
+  </section>
+
+  <section id="view-logs" class="view" role="tabpanel" aria-labelledby="tab-logs" hidden>
+    <div class="logs-layout">
+      <nav class="log-sources" id="log-sources" aria-label="Log sources"></nav>
+      <div class="log-panel">
+        <div class="log-toolbar">
+          <h3 id="log-title">Pick a source</h3>
+          <input type="search" id="log-filter" placeholder="Filter (text)" aria-label="Filter lines">
+          <select id="log-level" aria-label="Level">
+            <option value="">All lines</option>
+            <option value="W">Warnings and errors</option>
+            <option value="E">Errors only</option>
+          </select>
+          <label class="field check"><input type="checkbox" id="log-follow" checked> Follow</label>
+          <button class="btn small" id="log-pause" type="button" aria-pressed="false">Pause</button>
+          <button class="btn small" id="log-clear" type="button">Clear</button>
+          <button class="btn small" id="log-download" type="button"><svg class="icon"><use href="#i-download"/></svg>Save</button>
+        </div>
+        <div class="log-view" id="log-view" role="log" aria-live="off" tabindex="0">
+          <div class="log-empty">Pick a source on the left. Components started by the dashboard log to files; the core's logs come from docker.</div>
+        </div>
+        <div class="log-status" id="log-status"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="view-tasks" class="view" role="tabpanel" aria-labelledby="tab-tasks" hidden>
+    <div id="task-groups"></div>
+  </section>
+</main>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<dialog id="dialog">
+  <form method="dialog">
+    <h3 id="dlg-title"></h3>
+    <p id="dlg-text"></p>
+    <div class="fields" id="dlg-fields"></div>
+    <menu>
+      <button class="btn" value="cancel" type="submit">Cancel</button>
+      <button class="btn primary" value="ok" type="submit" id="dlg-ok">Confirm</button>
+    </menu>
+  </form>
+</dialog>
+
+<script src="/static/charts.js"></script>
+<script src="/static/topology.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

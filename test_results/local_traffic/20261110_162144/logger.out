@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/home/testbedpc-a/MECT-Thesis/run_local/log_du_metrics.py", line 144, in <module>
+    main()
+  File "/home/testbedpc-a/MECT-Thesis/run_local/log_du_metrics.py", line 66, in main
+    sched_f = open(os.path.join(OUT_DIR, "du_sched.csv"), "w", newline="", buffering=1)
+PermissionError: [Errno 13] Permission denied: '/home/testbedpc-a/MECT-Thesis/test_results/local_traffic/20261110_162144/du_sched.csv'

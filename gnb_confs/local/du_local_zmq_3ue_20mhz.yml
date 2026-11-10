@@ -1,0 +1,104 @@
+# DU for an all-in-one host: 20 MHz FDD cell (band n3, 15 kHz, 106 PRBs) over
+# ZMQ, 3 srsUEs (one per slice) through
+# multi-ue-broker_scripts/multi_ue_scenario_headless_3_20mhz.py, E2 to the OSC
+# near-RT RIC running in docker (e2term 10.0.2.10 on ric_network).
+#
+#   sudo srsdu -c gnb_confs/local/du_local_zmq_3ue_20mhz.yml
+#
+# Same radio settings as ../du_rf_b200_zmq_multi_ue_20mhz.yml.
+
+f1ap:
+  cu_cp_addr: 127.0.10.1
+  bind_addr: 127.0.10.2
+
+f1u:
+  socket:
+    -
+      bind_addr: 127.0.10.2
+
+ru_sdr:
+  device_driver: zmq
+  device_args: tx_port=tcp://127.0.0.1:2000,rx_port=tcp://127.0.0.1:2001,base_srate=23.04e6
+  srate: 23.04
+  tx_gain: 75
+  rx_gain: 75
+
+cell_cfg:
+  dl_arfcn: 368500
+  band: 3
+  channel_bandwidth_MHz: 20
+  common_scs: 15
+  plmn: "00101"
+  tac: 7
+  pdcch:
+    common:
+      ss0_index: 0
+      coreset0_index: 12
+    dedicated:
+      ss2_type: common
+      dci_format_0_1_and_1_1: false
+  prach:
+    prach_config_index: 1
+    total_nof_ra_preambles: 64
+  pdsch:
+    mcs_table: qam64
+  pusch:
+    mcs_table: qam64
+  # The three slices must exist at start-up: the DU only reconfigures slices
+  # declared here (E2SM-CCC or the "rrm_policy_ratio_set" WebSocket command).
+  # min 0 / max 100 / priority 0 = no slicing in practice (baseline).
+  # For priority + lending runs set priority 0 / 1 / 2 (low / medium / high).
+  slicing:
+    - sst: 1                        # low: ue1
+      sched_cfg:
+        min_prb_policy_ratio: 0
+        max_prb_policy_ratio: 100
+        priority: 0
+    - sst: 1                        # medium: ue2
+      sd: 1
+      sched_cfg:
+        min_prb_policy_ratio: 0
+        max_prb_policy_ratio: 100
+        priority: 0
+    - sst: 1                        # high: ue3
+      sd: 2
+      sched_cfg:
+        min_prb_policy_ratio: 0
+        max_prb_policy_ratio: 100
+        priority: 0
+
+e2:
+  enable_du_e2: true
+  e2sm_kpm_enabled: true
+  e2sm_rc_enabled: true
+  e2sm_ccc_enabled: true            # slice quota control (O-RRMPolicyRatio)
+  addr: 10.0.2.10                   # OSC RIC e2term container
+  bind_addr: 10.0.2.1               # host address on the ric_network bridge
+  port: 36421
+
+log:
+  filename: /tmp/du.log
+  all_level: info
+  e2ap_level: info
+  hex_max_size: 0
+
+pcap:
+  mac_enable: false
+  mac_filename: /tmp/du_mac.pcap
+  f1u_enable: false
+  f1u_filename: /tmp/du_f1u.pcap
+
+metrics:
+  enable_json: true
+  layers:
+    enable_rlc: true
+    enable_sched: true
+  periodicity:
+    du_report_period: 1000
+
+# WebSocket: JSON metrics ({"cmd":"metrics_subscribe"}) and remote commands
+# such as rrm_policy_ratio_set. Read by the dashboard.
+remote_control:
+  enabled: true
+  bind_addr: 0.0.0.0
+  port: 8001

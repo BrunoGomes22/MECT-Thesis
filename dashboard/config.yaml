@@ -1,0 +1,286 @@
+# srsRAN testbed dashboard (all-in-one host): Open5GS (systemd), OSC near-RT
+# RIC (docker compose), srsRAN CU + DU over ZMQ (20 MHz, 106 PRBs), GNU Radio
+# broker and 3 srsUEs, one per slice (low SST 1, medium SST 1/SD 1,
+# high SST 1/SD 2). Adapted from the OAI dashboard in ~/xApp-Development.
+#
+# Components run as transient systemd units "srsdash-<id>" (systemctl status
+# srsdash-du), output in <log_dir>/<id>.log. "match" finds a process also when
+# it was started from a terminal (run_local/start_srsran_local.sh). Do not mix:
+# a network started by the script shows as "outside dashboard" here.
+#
+# ${name} expands to an entry of "vars". After editing:
+#   sudo systemctl restart srsran-dashboard
+
+vars:
+  user: testbedpc-a
+  home: /home/testbedpc-a
+  repo: ${home}/MECT-Thesis
+  dash: ${repo}/dashboard
+  srsran: ${home}/srsRAN_Project/build/apps
+  srsue: ${home}/srsRAN_4G/build/srsue/src/srsue
+  ric_dir: ${home}/oran-sc-ric
+  conf: ${repo}/gnb_confs/local
+  ue_conf: ${repo}/srsue_confs/srsue_20mhz
+
+server:
+  host: 127.0.0.1
+  port: 8091            # the OAI dashboard uses 8090
+  allowed_hosts: []
+
+log_dir: /var/log/srsran-dashboard
+log_max_mb: 300
+
+metrics:
+  enabled: true
+  name: DU metrics (WebSocket)
+  description: "reads the DU's JSON metrics (ws://127.0.0.1:8001) and the RIC's E2 node list"
+  cmd: /usr/bin/python3 ${dash}/tools/srsran_exporter.py
+  user: ${user}
+  env:
+    SLICE_MAP: ${conf}/ue_slice_map.json
+    SRSUE_NOTE: "UE index = F1AP ID: ue1/ue2/ue3 attach in that order"
+  anchor: du            # the metrics come from the DU, not from an xApp
+  in_topology: false    # not an xApp: no E42 link to the RIC
+  mac_nodes: [du]
+  tick_s: 1
+  history_s: 1800
+  # FDD 15 kHz: 1000 DL and 1000 UL slots per second (PRB columns stay empty:
+  # the DU's JSON has no per-UE PRB counters)
+  dl_slots_per_s: 1000
+  ul_slots_per_s: 1000
+  cqi_note: "CQI as reported by the srsUE (always 15 over ZMQ). Queue delay = RLC buffer / DL rate."
+
+core:
+  type: systemd
+  name: 5G Core (Open5GS)
+  services: [open5gs-nrfd, open5gs-scpd, open5gs-amfd, open5gs-smfd, open5gs-upfd,
+             open5gs-ausfd, open5gs-udmd, open5gs-udrd, open5gs-pcfd, open5gs-nssfd,
+             open5gs-bsfd]
+  amf_service: open5gs-amfd
+  amf_log: /var/log/open5gs/amf.log
+
+components:
+  - id: ric
+    name: OSC near-RT RIC
+    group: RIC
+    role: ric
+    description: "docker compose up in ~/oran-sc-ric (down first: a restarted DU is refused with E2 Setup Failure by an e2mgr that still holds the old node)"
+    cwd: ${ric_dir}
+    pre: docker compose --project-directory ${ric_dir} down
+    cmd: docker compose --ansi never --project-directory ${ric_dir} up
+    match: {exe: docker, args: ["--project-directory ${ric_dir}", " up"]}
+    # started detached (start_srsran_local.sh): no "compose up" process
+    container: ric_e2term
+    container_stop: docker compose --project-directory ${ric_dir} down
+    stop_timeout: 60
+    autostart_order: 1
+    start_wait: {seconds: 15}
+
+  - id: cu
+    name: CU (srscu)
+    group: RAN
+    role: cu
+    description: srscu -c gnb_confs/local/cu_local.yml (AMF 127.0.0.5, F1 127.0.10.1)
+    cwd: ${repo}
+    cmd: stdbuf -oL ${srsran}/cu/srscu -c ${conf}/cu_local.yml
+    match: {exe: srscu, args: [cu_local.yml]}
+    markers:
+      - {name: NG Setup (AMF), link: ng, ok: "N2: Connection to AMF on .* completed", bad: "Failed to establish N2"}
+    autostart_order: 2
+    start_wait: {marker: NG Setup (AMF), timeout: 20}
+
+  - id: du
+    name: DU (srsdu, ZMQ)
+    group: RAN
+    role: du
+    description: srsdu -c gnb_confs/local/du_local_zmq_3ue_20mhz.yml (n3 FDD, 20 MHz, 106 PRBs, 3 slices)
+    cwd: ${repo}
+    cmd: stdbuf -oL ${srsran}/du/srsdu -c ${conf}/du_local_zmq_3ue_20mhz.yml
+    match: {exe: srsdu, args: [du_local_zmq_3ue_20mhz.yml]}
+    e2_types: [gNB-DU]
+    markers:
+      - {name: F1 Setup (CU), link: f1, ok: "F1-C: Connection to CU-CP on .* completed"}
+      - {name: E2 (SCTP to the RIC), link: e2, ok: "E2AP: Connection to Near-RT-RIC on .* completed"}
+    autostart_order: 3
+    start_wait: {marker: F1 Setup (CU), timeout: 40}
+
+  - id: ue1
+    name: UE1 (low)
+    group: UEs
+    role: ue
+    sst: 1
+    slice: 0
+    description: srsUE ue1_zmq.conf, namespace ue1, IMSI 001010123456780, SST 1 (no SD)
+    cwd: ${repo}
+    pre: ip netns list | grep -qw ue1 || ip netns add ue1
+    cmd: stdbuf -oL ${srsue} ${ue_conf}/ue1_zmq.conf
+    match: {exe: srsue, args: [ue1_zmq.conf]}
+    netns: ue1
+    imsi: "001010123456780"
+    markers:
+      - {name: RRC Connected, ok: "RRC Connected", bad: "RRC Release"}
+      - {name: PDU session, ok: "PDU Session Establishment successful"}
+    autostart_order: 4
+    start_wait: {seconds: 1}
+
+  - id: ue2
+    name: UE2 (medium)
+    group: UEs
+    role: ue
+    sst: 1
+    slice: 1
+    description: srsUE ue2_zmq.conf, namespace ue2, IMSI 001010123456790, SST 1 / SD 1
+    cwd: ${repo}
+    pre: ip netns list | grep -qw ue2 || ip netns add ue2
+    cmd: stdbuf -oL ${srsue} ${ue_conf}/ue2_zmq.conf
+    match: {exe: srsue, args: [ue2_zmq.conf]}
+    netns: ue2
+    imsi: "001010123456790"
+    markers:
+      - {name: RRC Connected, ok: "RRC Connected", bad: "RRC Release"}
+      - {name: PDU session, ok: "PDU Session Establishment successful"}
+    autostart_order: 5
+    start_wait: {seconds: 1}
+
+  - id: ue3
+    name: UE3 (high)
+    group: UEs
+    role: ue
+    sst: 1
+    slice: 2
+    description: srsUE ue3_zmq.conf, namespace ue3, IMSI 001010123456791, SST 1 / SD 2
+    cwd: ${repo}
+    pre: ip netns list | grep -qw ue3 || ip netns add ue3
+    cmd: stdbuf -oL ${srsue} ${ue_conf}/ue3_zmq.conf
+    match: {exe: srsue, args: [ue3_zmq.conf]}
+    netns: ue3
+    imsi: "001010123456791"
+    markers:
+      - {name: RRC Connected, ok: "RRC Connected", bad: "RRC Release"}
+      - {name: PDU session, ok: "PDU Session Establishment successful"}
+    autostart_order: 6
+    start_wait: {seconds: 1}
+
+  - id: broker
+    name: ZMQ broker (3 UEs, 20 MHz)
+    group: RAN
+    role: other
+    description: "GNU Radio flowgraph joining the DU and the 3 UEs; must start after the UEs. Attach path loss 0/10/20 dB, back to 0 dB after 45 s"
+    cwd: ${repo}
+    cmd: python3 ${repo}/multi-ue-broker_scripts/multi_ue_scenario_headless_3_20mhz.py
+    env: {PYTHONUNBUFFERED: "1"}
+    match: {exe: multi_ue_scenario_headless_3_20mhz.py}
+    params:
+      - {name: UE_ATTACH_PATH_LOSS_DB, label: "Attach path loss ue1,ue2,ue3 (dB)", default: "0,10,20", pattern: '^\d{1,3}(\.\d)?,\d{1,3}(\.\d)?,\d{1,3}(\.\d)?$', env: true}
+      - {name: UE_EQUALIZE_AFTER_S, label: "Back to 0 dB after (s)", default: "45", pattern: '^\d{1,4}$', env: true}
+    autostart_order: 7
+    start_wait: {seconds: 2}
+
+tasks:
+  - id: traffic_paper
+    name: Paper traffic phases (A, B, C, A2)
+    group: Traffic
+    description: "run_local/traffic_phases.sh: DL UDP 19/30/10, 43/10/11, 19/19/38, 19/30/10 Mbit/s (low/medium/high); results in test_results/local_traffic/"
+    cwd: ${repo}
+    cmd: ./run_local/traffic_phases.sh
+    params:
+      - {name: PHASE_SECS, label: "Seconds per phase", default: "300", pattern: '^\d{1,5}$', env: true}
+
+  - id: traffic_manual
+    name: iperf DL to the 3 UEs
+    group: Traffic
+    description: "run_local/iperf_manual.sh: one phase of DL UDP per UE (0 = none), logged like the paper runs"
+    cwd: ${repo}
+    cmd: ./run_local/iperf_manual.sh {low} {medium} {high} {duration}
+    params:
+      - {name: low, label: "UE1 low (Mbit/s)", default: "10", pattern: '^\d{1,3}(\.\d{1,2})?$'}
+      - {name: medium, label: "UE2 medium (Mbit/s)", default: "10", pattern: '^\d{1,3}(\.\d{1,2})?$'}
+      - {name: high, label: "UE3 high (Mbit/s)", default: "10", pattern: '^\d{1,3}(\.\d{1,2})?$'}
+      - {name: duration, label: "Duration (s)", default: "60", pattern: '^\d{1,5}$'}
+
+  - id: iperf_ul
+    name: iperf UL from one UE
+    group: Traffic
+    description: "run_local/iperf_ul.sh: UL UDP from the UE's namespace to 10.45.0.1"
+    cwd: ${repo}
+    cmd: ./run_local/iperf_ul.sh {ns} {rate} {duration}
+    params:
+      - {name: ns, label: "UE", type: choice, choices: [ue1, ue2, ue3], default: ue1}
+      - {name: rate, label: "Rate (Mbit/s)", default: "5", pattern: '^\d{1,3}(\.\d{1,2})?$'}
+      - {name: duration, label: "Duration (s)", default: "30", pattern: '^\d{1,5}$'}
+
+  - id: stress_test
+    name: Cell stress test
+    group: Traffic
+    description: "run_local/stress_test.sh: equal DL load 30 to 90 Mbit/s, then one UE at 70 Mbit/s; prints the summary"
+    cwd: ${repo}
+    cmd: ./run_local/stress_test.sh
+    params:
+      - {name: STEP_SECS, label: "Seconds per step", default: "30", pattern: '^\d{1,4}$', env: true}
+
+  - id: slice_quota
+    name: Set a slice PRB quota
+    group: Slicing
+    description: "run_local/set_slice_quota.py: DU WebSocket command rrm_policy_ratio_set; min = guarantee, max = cap, % of 106 PRBs"
+    user: ${user}
+    cwd: ${repo}
+    cmd: python3 run_local/set_slice_quota.py {slice} {min} {max}
+    params:
+      - {name: slice, label: "Slice", type: choice, choices: [low, medium, high, all], default: high}
+      - {name: min, label: "Min % (guaranteed)", default: "0", pattern: '^\d{1,3}$'}
+      - {name: max, label: "Max % (cap)", default: "100", pattern: '^\d{1,3}$'}
+
+  - id: slice_quota_reset
+    name: Reset slice quotas (0 / 100)
+    group: Slicing
+    description: all slices back to min 0 %, max 100 % (no slicing)
+    user: ${user}
+    cwd: ${repo}
+    cmd: python3 run_local/set_slice_quota.py all 0 100
+
+  - id: analyze_last
+    name: Analyse the last traffic run
+    group: Analysis
+    description: "run_local/analyze_phases.py latest: served/offered, loss, MCS, queue per phase and UE"
+    user: ${user}
+    cwd: ${repo}
+    cmd: python3 run_local/analyze_phases.py latest
+
+  - id: ping_ues
+    name: Ping from the UEs to the core
+    group: Diagnostics
+    description: 3 pings from each UE namespace to 10.45.0.1 (ogstun)
+    cmd: bash -c 'for n in 1 2 3; do echo "== ue$n"; ip netns exec ue$n ping -c 3 -W 2 10.45.0.1; done'
+
+  - id: netns_create
+    name: Create namespaces ue1-3
+    group: Diagnostics
+    description: ip netns add ue1..ue3 (the UEs also create theirs on start)
+    cmd: bash -c 'for n in 1 2 3; do ip netns list | grep -qw ue$n || ip netns add ue$n; done; ip netns list'
+
+  - id: e2_nodes
+    name: E2 nodes at the RIC
+    group: Diagnostics
+    description: e2mgr REST /v1/nodeb/states
+    user: ${user}
+    cmd: curl -s -m 5 http://10.0.2.11:3800/v1/nodeb/states
+
+  - id: subscribers
+    name: Open5GS subscribers
+    group: Core
+    description: IMSI and S-NSSAI of every subscriber in MongoDB
+    user: ${user}
+    cmd: >-
+      mongosh --quiet mongodb://localhost/open5gs --eval
+      'db.subscribers.find({},{_id:0,imsi:1,"slice.sst":1,"slice.sd":1}).forEach(s => print(s.imsi, JSON.stringify(s.slice)))'
+
+extra_logs:
+  - {id: du_log, group: srsRAN logs, name: "DU log (/tmp/du.log)", path: /tmp/du.log}
+  - {id: cu_log, group: srsRAN logs, name: "CU log (/tmp/cu.log)", path: /tmp/cu.log}
+  - {id: ue1_log, group: srsRAN logs, name: "UE1 log (/tmp/ue1.log)", path: /tmp/ue1.log}
+  - {id: ue2_log, group: srsRAN logs, name: "UE2 log (/tmp/ue2.log)", path: /tmp/ue2.log}
+  - {id: ue3_log, group: srsRAN logs, name: "UE3 log (/tmp/ue3.log)", path: /tmp/ue3.log}
+  - {id: amf_log, group: Open5GS logs, name: AMF, path: /var/log/open5gs/amf.log}
+  - {id: smf_log, group: Open5GS logs, name: SMF, path: /var/log/open5gs/smf.log}
+  - {id: upf_log, group: Open5GS logs, name: UPF, path: /var/log/open5gs/upf.log}
+  - {id: nssf_log, group: Open5GS logs, name: NSSF, path: /var/log/open5gs/nssf.log}

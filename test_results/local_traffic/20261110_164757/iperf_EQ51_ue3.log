@@ -1,0 +1,39 @@
+Connecting to host 10.45.0.1, port 5203
+Reverse mode, remote host 10.45.0.1 is sending
+[  5] local 10.45.0.7 port 50410 connected to 10.45.0.1 port 5203
+[ ID] Interval           Transfer     Bitrate         Jitter    Lost/Total Datagrams
+[  5]   0.00-1.00   sec  2.14 MBytes  18.0 Mbits/sec  0.768 ms  0/1666 (0%)  
+[  5]   1.00-2.00   sec  2.03 MBytes  17.0 Mbits/sec  0.585 ms  0/1578 (0%)  
+[  5]   2.00-3.00   sec  2.03 MBytes  17.0 Mbits/sec  0.820 ms  0/1578 (0%)  
+[  5]   3.00-4.00   sec  2.02 MBytes  17.0 Mbits/sec  0.822 ms  0/1573 (0%)  
+[  5]   4.00-5.00   sec  2.03 MBytes  17.0 Mbits/sec  0.653 ms  0/1580 (0%)  
+[  5]   5.00-6.00   sec  2.02 MBytes  17.0 Mbits/sec  0.603 ms  0/1575 (0%)  
+[  5]   6.00-7.00   sec  2.03 MBytes  17.0 Mbits/sec  0.985 ms  0/1576 (0%)  
+[  5]   7.00-8.00   sec  2.03 MBytes  17.0 Mbits/sec  0.749 ms  0/1578 (0%)  
+[  5]   8.00-9.00   sec  2.03 MBytes  17.0 Mbits/sec  0.722 ms  0/1576 (0%)  
+[  5]   9.00-10.00  sec  2.02 MBytes  17.0 Mbits/sec  0.357 ms  0/1575 (0%)  
+[  5]  10.00-11.00  sec  2.03 MBytes  17.0 Mbits/sec  0.546 ms  0/1576 (0%)  
+[  5]  11.00-12.00  sec  2.03 MBytes  17.0 Mbits/sec  0.480 ms  0/1576 (0%)  
+[  5]  12.00-13.00  sec  2.03 MBytes  17.0 Mbits/sec  0.612 ms  0/1578 (0%)  
+[  5]  13.00-14.00  sec  2.03 MBytes  17.0 Mbits/sec  0.627 ms  0/1576 (0%)  
+[  5]  14.00-15.00  sec  2.03 MBytes  17.0 Mbits/sec  0.497 ms  0/1578 (0%)  
+[  5]  15.00-16.00  sec  2.03 MBytes  17.0 Mbits/sec  0.681 ms  0/1577 (0%)  
+[  5]  16.00-17.00  sec  2.02 MBytes  17.0 Mbits/sec  0.516 ms  0/1575 (0%)  
+[  5]  17.00-18.00  sec  2.02 MBytes  17.0 Mbits/sec  0.451 ms  0/1574 (0%)  
+[  5]  18.00-19.00  sec  2.03 MBytes  17.0 Mbits/sec  0.835 ms  0/1576 (0%)  
+[  5]  19.00-20.00  sec  2.03 MBytes  17.0 Mbits/sec  0.468 ms  0/1580 (0%)  
+[  5]  20.00-21.00  sec  2.02 MBytes  17.0 Mbits/sec  0.828 ms  0/1573 (0%)  
+[  5]  21.00-22.00  sec  2.03 MBytes  17.0 Mbits/sec  0.624 ms  0/1580 (0%)  
+[  5]  22.00-23.00  sec  2.02 MBytes  17.0 Mbits/sec  0.881 ms  0/1573 (0%)  
+[  5]  23.00-24.00  sec  2.03 MBytes  17.0 Mbits/sec  0.932 ms  0/1577 (0%)  
+[  5]  24.00-25.00  sec  2.03 MBytes  17.0 Mbits/sec  0.655 ms  0/1578 (0%)  
+[  5]  25.00-26.00  sec  2.02 MBytes  17.0 Mbits/sec  0.710 ms  0/1572 (0%)  
+[  5]  26.00-27.00  sec  2.03 MBytes  17.0 Mbits/sec  0.631 ms  0/1579 (0%)  
+[  5]  27.00-28.00  sec  2.03 MBytes  17.0 Mbits/sec  0.628 ms  0/1576 (0%)  
+[  5]  28.00-29.00  sec  2.03 MBytes  17.0 Mbits/sec  0.836 ms  0/1576 (0%)  
+[  5]  29.00-29.80  sec  1.62 MBytes  17.0 Mbits/sec  0.682 ms  0/1260 (0%)  
+iperf3: interrupt - the client has terminated
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[ ID] Interval           Transfer     Bitrate         Jitter    Lost/Total Datagrams
+[  5]   0.00-29.80  sec  0.00 Bytes  0.00 bits/sec  0.000 ms  0/0 (0%)  sender
+[  5]   0.00-29.80  sec  60.5 MBytes  17.0 Mbits/sec  0.682 ms  0/47065 (0%)  receiver

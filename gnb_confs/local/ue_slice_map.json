@@ -1,0 +1,7 @@
+{
+  "ues": [
+    {"gnb_cu_ue_f1ap_id": 0, "sst": 1, "sd": "ffffff"},
+    {"gnb_cu_ue_f1ap_id": 1, "sst": 1, "sd": "000001"},
+    {"gnb_cu_ue_f1ap_id": 2, "sst": 1, "sd": "000002"}
+  ]
+}

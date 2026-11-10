@@ -1,0 +1,51 @@
+# CU (CU-CP + CU-UP) for an all-in-one host: Open5GS native, DU, UEs and the
+# OSC near-RT RIC (docker) on the same machine. Addresses are on loopback so
+# they do not clash with the OAI stack on this host (OAI CU uses 127.0.0.3/4,
+# FlexRIC 127.0.0.1:36421, OAI core 192.168.70.128/26).
+#
+#   sudo srscu -c gnb_confs/local/cu_local.yml
+
+cu_cp:
+  inactivity_timer: 7200
+  amf:
+    addr: 127.0.0.5                 # Open5GS AMF default NGAP address
+    bind_addr: 127.0.0.1
+    supported_tracking_areas:
+      - tac: 7
+        plmn_list:
+          - plmn: "00101"
+            tai_slice_support_list:
+              - sst: 1              # low priority (no SD)
+              - sst: 1
+                sd: 1               # medium priority
+              - sst: 1
+                sd: 2               # high priority
+  f1ap:
+    bind_addr: 127.0.10.1
+
+cu_up:
+  ngu:
+    socket:
+      -
+        bind_addr: 127.0.3.1        # N3 towards the Open5GS UPF (127.0.0.7)
+  f1u:
+    socket:
+      -
+        bind_addr: 127.0.10.1
+
+metrics:
+  layers:
+    enable_pdcp: true
+    enable_rrc: true
+  periodicity:
+    cu_cp_report_period: 1000
+    cu_up_report_period: 1000
+
+log:
+  filename: /tmp/cu.log
+  all_level: warning
+  e2ap_level: info
+
+pcap:
+  ngap_enable: false
+  ngap_filename: /tmp/cu_ngap.pcap
